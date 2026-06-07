@@ -47,7 +47,14 @@
           "backgroundColor": "#f4f1ea"
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Pick a photo of a book page to turn into a Dutch lesson.",
+          "cameraPermission": "Scan book pages to turn them into Dutch lessons."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": false

@@ -1,26 +1,100 @@
-// Book view — the table of contents. Lists chapters (dimming ones with no pages
-// built yet), a "Begin reading" entry point, and the Scan action that Phase 1
-// wires to the document scanner.
+// Book view — the table of contents and the capture entry point: photograph a
+// page, Claude turns it into a lesson, and it appends here. (Capture uses the
+// system camera/gallery for now; Phase 1 swaps in the ML Kit document scanner.)
 
-import { useCallback, useState } from "react";
+import { useCallback, useRef, useState } from "react";
 import { Alert, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { Book } from "../../src/data/schema";
 import { getBook } from "../../src/storage/books";
+import { getApiKey, getModel, ModelChoice } from "../../src/storage/apiKey";
+import {
+  captureImage,
+  CaptureSource,
+  processScan,
+} from "../../src/capture/scan";
+import ScanOverlay, { ScanPhase } from "../../src/components/ScanOverlay";
 import { colors, fonts, radius, spacing } from "../../src/theme/theme";
+
+interface Pending {
+  asset: { uri: string; width?: number; height?: number };
+  apiKey: string;
+  model: ModelChoice;
+}
 
 export default function BookScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
   const [book, setBook] = useState<Book | null>(null);
+  const [scan, setScan] = useState<ScanPhase | null>(null);
+  const pending = useRef<Pending | null>(null);
 
   useFocusEffect(
     useCallback(() => {
       if (id) getBook(id).then(setBook);
     }, [id]),
   );
+
+  // Run the capture → Claude → append pipeline for an already-captured asset.
+  async function runPipeline(p: Pending) {
+    if (!book) return;
+    pending.current = p;
+    setScan({ k: "working", label: "Preparing the image…" });
+    try {
+      const { book: updated, pageIdx } = await processScan(
+        book.id,
+        p.asset,
+        p.apiKey,
+        p.model,
+        (label) => setScan({ k: "working", label }),
+      );
+      setBook(updated);
+      setScan({ k: "done", pageIdx });
+    } catch (e) {
+      const message =
+        e instanceof Error ? e.message : "Something went wrong. Try again.";
+      setScan({ k: "error", message });
+    }
+  }
+
+  // Entry point for the Scan button: gate on the API key, choose a source,
+  // capture, then process.
+  async function onScanPress() {
+    const apiKey = await getApiKey();
+    if (!apiKey) {
+      Alert.alert(
+        "Add your API key first",
+        "Scanning sends the page to Claude. Add your Anthropic key in Settings.",
+        [
+          { text: "Cancel", style: "cancel" },
+          { text: "Open Settings", onPress: () => router.push("/settings") },
+        ],
+      );
+      return;
+    }
+    const model = await getModel();
+
+    const start = async (source: CaptureSource) => {
+      try {
+        const asset = await captureImage(source);
+        if (!asset) return; // user cancelled
+        await runPipeline({ asset, apiKey, model });
+      } catch (e) {
+        setScan({
+          k: "error",
+          message: e instanceof Error ? e.message : "Capture failed.",
+        });
+      }
+    };
+
+    Alert.alert("Add a page", "Capture the page you're reading.", [
+      { text: "Take photo", onPress: () => start("camera") },
+      { text: "Choose from library", onPress: () => start("library") },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  }
 
   if (!book) {
     return (
@@ -49,17 +123,9 @@ export default function BookScreen() {
         <Text style={styles.kicker}>{book.meta.author}</Text>
         <Text style={styles.title}>{book.meta.title}</Text>
 
-        <Pressable
-          style={styles.scanBtn}
-          onPress={() =>
-            Alert.alert(
-              "Scanning arrives next",
-              "Phase 1 adds the document scanner: photograph a page, and Claude turns it into a lesson that appends here. For now, explore the bundled sample.",
-            )
-          }
-        >
+        <Pressable style={styles.scanBtn} onPress={onScanPress}>
           <Feather name="camera" size={18} color={colors.paper} />
-          <Text style={styles.scanText}>Scan next page</Text>
+          <Text style={styles.scanText}>Scan a page</Text>
         </Pressable>
 
         {book.pages.length > 0 ? (
@@ -95,6 +161,20 @@ export default function BookScreen() {
           </>
         )}
       </ScrollView>
+
+      <ScanOverlay
+        phase={scan}
+        onCancel={() => setScan(null)}
+        onRetry={() => pending.current && runPipeline(pending.current)}
+        onScanAnother={() => {
+          setScan(null);
+          onScanPress();
+        }}
+        onRead={(pageIdx) => {
+          setScan(null);
+          open(pageIdx);
+        }}
+      />
     </SafeAreaView>
   );
 }
