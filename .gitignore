@@ -1,0 +1,28 @@
+# dependencies
+node_modules/
+
+# expo
+.expo/
+dist/
+web-build/
+expo-env.d.ts
+
+# native
+/ios
+/android
+*.orig.*
+
+# metro
+.metro-health-check*
+
+# misc
+*.log
+.DS_Store
+npm-debug.*
+yarn-error.*
+
+# local env / secrets
+.env*.local
+
+# Bridge-archived scan artifacts (book pages, lessons, formatted HTML)
+projects/
