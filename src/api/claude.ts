@@ -201,6 +201,45 @@ export async function imageToLesson(
   return JSON.parse(textBlock.text) as LessonResult;
 }
 
+// ─── Local Claude Code bridge (Max plan) ──────────────────────────────────
+// Same LessonResult out; the laptop's Claude Code does the vision work, so no
+// API key is involved. See bridge/server.mjs.
+
+export async function pingBridge(bridgeUrl: string): Promise<boolean> {
+  const res = await fetch(`${bridgeUrl}/health`, { method: "GET" });
+  if (!res.ok) throw new ClaudeError(`Bridge responded ${res.status}`, res.status);
+  const json = await res.json();
+  if (!json?.ok) throw new ClaudeError("Bridge is reachable but not healthy.");
+  return true;
+}
+
+export async function lessonFromBridge(
+  base64Jpeg: string,
+  bridgeUrl: string,
+  model: ModelChoice,
+): Promise<LessonResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${bridgeUrl}/lesson`, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ image: base64Jpeg, model }),
+    });
+  } catch {
+    throw new ClaudeError(
+      "Couldn't reach the bridge. Is the laptop server running and on the same Wi-Fi?",
+    );
+  }
+  const json = await res.json();
+  if (!res.ok || json?.error) {
+    throw new ClaudeError(json?.error || `Bridge error ${res.status}`, res.status);
+  }
+  if (!Array.isArray(json.paragraphs)) {
+    throw new ClaudeError("Bridge returned an unexpected response.");
+  }
+  return json as LessonResult;
+}
+
 // Convert a LessonResult into the reader's Page shape (minus page number, which
 // appendPage assigns). Sentence ids are placeholders here; appendPage rewrites them.
 export function lessonToParagraphs(lesson: LessonResult): Paragraph[] {

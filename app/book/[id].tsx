@@ -9,19 +9,24 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { Book } from "../../src/data/schema";
 import { getBook } from "../../src/storage/books";
-import { getApiKey, getModel, ModelChoice } from "../../src/storage/apiKey";
+import {
+  getApiKey,
+  getBridgeUrl,
+  getModel,
+  getSource,
+} from "../../src/storage/apiKey";
 import {
   captureImage,
   CaptureSource,
   processScan,
+  TranslateConfig,
 } from "../../src/capture/scan";
 import ScanOverlay, { ScanPhase } from "../../src/components/ScanOverlay";
 import { colors, fonts, radius, spacing } from "../../src/theme/theme";
 
 interface Pending {
   asset: { uri: string; width?: number; height?: number };
-  apiKey: string;
-  model: ModelChoice;
+  cfg: TranslateConfig;
 }
 
 export default function BookScreen() {
@@ -46,8 +51,7 @@ export default function BookScreen() {
       const { book: updated, pageIdx } = await processScan(
         book.id,
         p.asset,
-        p.apiKey,
-        p.model,
+        p.cfg,
         (label) => setScan({ k: "working", label }),
       );
       setBook(updated);
@@ -59,28 +63,51 @@ export default function BookScreen() {
     }
   }
 
-  // Entry point for the Scan button: gate on the API key, choose a source,
-  // capture, then process.
-  async function onScanPress() {
+  // Resolve the translation source (API key or local bridge). Returns a config,
+  // or null after prompting the user to finish setup in Settings.
+  async function resolveConfig(): Promise<TranslateConfig | null> {
+    const source = await getSource();
+    const model = await getModel();
+    if (source === "bridge") {
+      const bridgeUrl = await getBridgeUrl();
+      if (!bridgeUrl) {
+        promptSettings(
+          "Set the bridge URL",
+          "You're set to use the local Claude Code bridge. Add its URL in Settings.",
+        );
+        return null;
+      }
+      return { source: "bridge", bridgeUrl, model };
+    }
     const apiKey = await getApiKey();
     if (!apiKey) {
-      Alert.alert(
+      promptSettings(
         "Add your API key first",
-        "Scanning sends the page to Claude. Add your Anthropic key in Settings.",
-        [
-          { text: "Cancel", style: "cancel" },
-          { text: "Open Settings", onPress: () => router.push("/settings") },
-        ],
+        "Scanning sends the page to Claude. Add your Anthropic key in Settings — or switch to the local Claude Code bridge.",
       );
-      return;
+      return null;
     }
-    const model = await getModel();
+    return { source: "api", apiKey, model };
+  }
+
+  function promptSettings(title: string, message: string) {
+    Alert.alert(title, message, [
+      { text: "Cancel", style: "cancel" },
+      { text: "Open Settings", onPress: () => router.push("/settings") },
+    ]);
+  }
+
+  // Entry point for the Scan button: resolve the source, choose a capture
+  // method, capture, then process.
+  async function onScanPress() {
+    const cfg = await resolveConfig();
+    if (!cfg) return;
 
     const start = async (source: CaptureSource) => {
       try {
         const asset = await captureImage(source);
         if (!asset) return; // user cancelled
-        await runPipeline({ asset, apiKey, model });
+        await runPipeline({ asset, cfg });
       } catch (e) {
         setScan({
           k: "error",

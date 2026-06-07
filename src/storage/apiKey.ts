@@ -6,9 +6,16 @@ import AsyncStorage from "@react-native-async-storage/async-storage";
 
 const KEY_SLOT = "anthropic_api_key";
 const MODEL_SLOT = "anthropic_model";
+const SOURCE_SLOT = "translation_source";
+const BRIDGE_SLOT = "bridge_url";
 
 export type ModelChoice = "claude-opus-4-8" | "claude-sonnet-4-6";
 export const DEFAULT_MODEL: ModelChoice = "claude-opus-4-8";
+
+// Where translations are produced: the paid API, or a local Claude Code bridge
+// running on your laptop (powered by a Max subscription).
+export type TranslationSource = "api" | "bridge";
+export const DEFAULT_SOURCE: TranslationSource = "api";
 
 export async function getApiKey(): Promise<string | null> {
   try {
@@ -37,4 +44,29 @@ export async function getModel(): Promise<ModelChoice> {
 
 export async function setModel(model: ModelChoice): Promise<void> {
   await AsyncStorage.setItem(MODEL_SLOT, model);
+}
+
+export async function getSource(): Promise<TranslationSource> {
+  const v = (await AsyncStorage.getItem(SOURCE_SLOT)) as TranslationSource | null;
+  return v ?? DEFAULT_SOURCE;
+}
+
+export async function setSource(source: TranslationSource): Promise<void> {
+  await AsyncStorage.setItem(SOURCE_SLOT, source);
+}
+
+// Normalize a pasted bridge URL: trim, add http:// if missing, drop trailing slash.
+export function normalizeBridgeUrl(raw: string): string {
+  let u = raw.trim();
+  if (!u) return "";
+  if (!/^https?:\/\//i.test(u)) u = "http://" + u;
+  return u.replace(/\/+$/, "");
+}
+
+export async function getBridgeUrl(): Promise<string> {
+  return (await AsyncStorage.getItem(BRIDGE_SLOT)) ?? "";
+}
+
+export async function setBridgeUrl(url: string): Promise<void> {
+  await AsyncStorage.setItem(BRIDGE_SLOT, normalizeBridgeUrl(url));
 }

@@ -8,10 +8,16 @@ import * as ImagePicker from "expo-image-picker";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import type { Book } from "../data/schema";
 import { appendPage } from "../storage/books";
-import { imageToLesson, lessonToParagraphs } from "../api/claude";
+import { imageToLesson, lessonFromBridge, lessonToParagraphs } from "../api/claude";
 import type { ModelChoice } from "../storage/apiKey";
 
 export type CaptureSource = "camera" | "library";
+
+// Where the lesson comes from: the paid API (key) or the local Claude Code
+// bridge (Max plan). The pipeline downstream is identical either way.
+export type TranslateConfig =
+  | { source: "api"; apiKey: string; model: ModelChoice }
+  | { source: "bridge"; bridgeUrl: string; model: ModelChoice };
 
 // Cap the long edge so Claude's image-token cost stays modest while keeping
 // text legible. Claude downsizes large images anyway; ~1568px is a good balance.
@@ -82,15 +88,21 @@ export interface ScanResult {
 export async function processScan(
   bookId: string,
   asset: { uri: string; width?: number; height?: number },
-  apiKey: string,
-  model: ModelChoice,
+  cfg: TranslateConfig,
   onPhase: (label: string) => void,
 ): Promise<ScanResult> {
   onPhase("Preparing the image…");
   const base64 = await prepareImage(asset);
 
-  onPhase("Reading the page with Claude…");
-  const lesson = await imageToLesson(base64, apiKey, model);
+  onPhase(
+    cfg.source === "bridge"
+      ? "Reading the page via Claude Code…"
+      : "Reading the page with Claude…",
+  );
+  const lesson =
+    cfg.source === "bridge"
+      ? await lessonFromBridge(base64, cfg.bridgeUrl, cfg.model)
+      : await imageToLesson(base64, cfg.apiKey, cfg.model);
 
   if (!lesson.paragraphs.length) {
     throw new Error("No Dutch text was found on this page. Try a clearer photo.");
