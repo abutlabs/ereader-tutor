@@ -35,6 +35,22 @@ export async function saveLearned(
   }
 }
 
+// Move a page's learned set when the page is re-labelled to a new number.
+export async function moveLearned(
+  bookId: string,
+  oldNum: number,
+  newNum: number,
+): Promise<void> {
+  if (oldNum === newNum) return;
+  try {
+    const s = await loadLearned(bookId, oldNum);
+    if (s.size) await saveLearned(bookId, newNum, s);
+    await AsyncStorage.removeItem(key(bookId, oldNum));
+  } catch {
+    // Non-fatal — progress is a nicety.
+  }
+}
+
 // Remember the last page index read in each book, so reopening resumes there
 // (an improvement over the web prototype, which always reset to page 1).
 function lastPageKey(bookId: string) {

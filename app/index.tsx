@@ -87,7 +87,12 @@ export default function ProjectsScreen() {
             onLongPress={() => onLongPress(item)}
           >
             <View style={{ flex: 1 }}>
-              <Text style={styles.cardTitle}>{item.title}</Text>
+              <View style={styles.titleRow}>
+                <Text style={styles.cardTitle}>{item.title}</Text>
+                {item.status === "complete" && (
+                  <Feather name="check-circle" size={15} color={colors.good} />
+                )}
+              </View>
               <Text style={styles.cardMeta}>
                 {item.author} · {item.pageCount}{" "}
                 {item.pageCount === 1 ? "page" : "pages"}
@@ -160,6 +165,7 @@ const styles = StyleSheet.create({
     padding: spacing(5),
     marginBottom: spacing(3),
   },
+  titleRow: { flexDirection: "row", alignItems: "center", gap: spacing(2) },
   cardTitle: { fontFamily: fonts.display, fontSize: 19, color: colors.ink },
   cardMeta: {
     fontFamily: fonts.body,

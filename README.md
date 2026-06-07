@@ -1,41 +1,41 @@
 # EReader Tutor
 
-An Android (and iOS) language-learning reader. Photograph a page of a book, and
-Claude turns it into an interactive lesson — tap any sentence for a translation,
-word-by-word breakdown, A2 grammar notes, and native-voice audio. Each scan grows
-a book in local storage.
+A language-learning reader for iOS and Android. Photograph a page of a foreign
+book, and Claude turns it into an interactive lesson — tap any sentence for a
+translation, word-by-word breakdown, A2 grammar notes, and native-voice audio.
+Each scan grows a book in local storage; the original page artwork is kept and
+shown alongside the text (great for children's books).
 
-Built on the prototype reader for _Uit het leven van Dik Trom_ (C. J. Kieviet,
-public domain), ported to a real Expo / React Native app.
+Built on a prototype reader for _Uit het leven van Dik Trom_ (C. J. Kieviet,
+public domain), now a real Expo / React Native app.
 
 ---
 
-## Status: Phase 0 — Foundation ✅
+## What it does
 
-This is the foundation: the app shell, storage, secure key handling, and the
-**reader ported from the web prototype to native** (with real OS Dutch voices via
-`expo-speech` instead of browser TTS). The bundled Dik Trom chapters 1–2 (7 pages,
-55 sentences, 338 word breakdowns, 176 grammar notes) are preloaded so there's
-something to study immediately.
-
-### What works now
-- **Projects home** — list / create / delete books.
-- **Reader** — flowing tappable Dutch with a drop cap, page navigation, the
-  tap-to-translate sheet (translation, word-by-word audio, grammar notes), slow
-  mode, mark-as-learned, and **reading position that resumes** where you left off.
-- **Settings** — paste your Anthropic API key (stored in the device keystore),
-  **test it live**, and choose Opus 4.8 vs Sonnet 4.6 with per-page cost shown.
-- **Native audio** — Dutch sentences and words spoken with the OS voice.
-
-### Coming next
-- **Phase 1 — Capture:** ML Kit document scanner (edge-detect, deskew, multi-page).
-- **Phase 2 — Translate:** wire the scanner to `src/api/claude.ts` — photo →
-  resize → Claude vision (one structured-output call) → append page to the book.
-- **Phase 2.1 — Render:** the appended page flows straight into this reader.
-
-The Phase 2 engine is already written (`src/api/claude.ts`): a single Claude
-vision call with a forced JSON schema returns the exact lesson shape. The Settings
-"test key" button exercises it today.
+- **Scan → lesson.** Photograph a page (camera or gallery). Claude reads it,
+  transcribes the source text, translates it, and produces a per-sentence
+  breakdown (word-by-word + grammar notes). The page appends to the book.
+- **Two translation sources** (Settings → Translation source):
+  - **Anthropic API key** — pay-as-you-go, works anywhere.
+  - **Local Claude Code bridge (Max plan)** — free via your Claude Max
+    subscription, by running a tiny server on your laptop. See
+    [`bridge/README.md`](bridge/README.md).
+- **Reader.** Flowing, tappable text with a drop cap; the page photo shown above
+  it; a tap-to-translate sheet (translation, word-by-word audio, grammar notes,
+  slow mode); native-voice audio; learned markers (dim + ✓); and a reading
+  position that resumes where you left off.
+- **Study word list.** Bookmark any word or phrase from the breakdown into a
+  per-book list to come back to — separate from the quick "learned" tap.
+- **Book metadata.** Editable author and **status** (open → complete), and a
+  configurable **lesson language** (translations/notes are written in *your*
+  language — English by default, any language supported).
+- **Contents index.** A per-book table of contents with per-page progress;
+  long-press to **re-label** a page to its real book number. Marking a book
+  complete builds an `index.html` of the formatted study pages.
+- **Page numbering.** Each scan is labelled with its real book page number
+  (so out-of-order scans and gaps are fine); Claude also reads the printed
+  number as a cross-check.
 
 ---
 
@@ -46,61 +46,79 @@ npm install
 npx expo start
 ```
 
-Then open it on your phone with the **Expo Go** app (scan the QR). Phase 0 uses
-only modules bundled in Expo Go, so no native build is needed yet.
+Open it on your phone with **Expo Go** (scan the QR). Everything currently uses
+modules bundled in Expo Go, so no native build is needed.
 
-> **Phase 1 will need a dev build.** The document scanner is a native module that
-> Expo Go can't load. When we add it, run `npx expo run:android` (local Android
-> SDK) or `eas build -p android --profile development` to get an installable APK.
-> Same path gives you a shareable APK later.
+To use the free **Max-plan bridge**, also run the laptop server (separate
+terminal) and point the app at it — see [`bridge/README.md`](bridge/README.md):
+
+```bash
+node bridge/server.mjs
+```
 
 Type-check at any time with `npm run typecheck`.
+
+> A future document-scanner (ML Kit edge-detect/deskew) is a native module that
+> Expo Go can't load; that step will need a dev build (`npx expo run:android` or
+> an EAS build). The current camera/gallery capture works in Expo Go today.
 
 ---
 
 ## Architecture
 
 ```
-app/                     expo-router screens
-  _layout.tsx            fonts + providers
-  index.tsx              projects home
-  settings.tsx           API key + model
-  book/[id].tsx          book view / table of contents
-  reader/[id].tsx        the reader
+app/                       expo-router screens
+  _layout.tsx              fonts + providers
+  index.tsx                projects home (status badges)
+  settings.tsx             API key / model / translation source
+  book/[id].tsx            book view — scan, sync, word list, contents, edit
+  edit/[id].tsx            edit metadata — author, status, lesson language
+  contents/[id].tsx        table of contents + per-page progress + re-label
+  wordlist/[id].tsx        saved word/phrase study list
+  reader/[id].tsx          the reader
 
 src/
   data/
-    schema.ts            Book / Page / Sentence / Word / Note types
-    dikTrom.ts           bundled sample lesson data (extracted from the prototype)
+    schema.ts              Book / Page / Sentence / Word / Note + status, languages
+    languages.ts           source/target language helpers
+    dikTrom.ts             bundled sample lesson data
   storage/
-    books.ts             book repository (file-system, JSON per book)
-    progress.ts          learned-set + reading position
-    apiKey.ts            secure key store + model preference
-  audio/speech.ts        expo-speech wrapper (native Dutch voices)
-  api/claude.ts          the Phase 2 vision pipeline (image → structured lesson)
+    books.ts               book repository (JSON per book) + page images
+    progress.ts            learned-set + reading position
+    wordlist.ts            per-book saved words/phrases
+    apiKey.ts              secure key store, model + source + bridge-url prefs
+  capture/scan.ts          capture → translate pipeline (API + bridge) + sync + relabel
+  api/claude.ts            Claude vision call + bridge client
+  audio/speech.ts          expo-speech wrapper (native voices)
   components/
-    SentenceSheet.tsx    the tap-to-translate sheet
-  theme/theme.ts         cream-paper / terracotta palette + fonts
+    SentenceSheet.tsx      tap-to-translate sheet (+ word bookmarks)
+    ScanOverlay.tsx        capture progress / queued / done states
+    NumberPrompt.tsx       page-number / re-label modal
+  theme/theme.ts           cream-paper / terracotta palette + fonts
+
+bridge/                    laptop server for the Max-plan path (see its README)
+projects/                  bridge output: projects/<book>/Page<N>/ (gitignored)
 ```
 
 ### Data model
 Content-agnostic on purpose: any source (scanned book, public-domain text) fits
-the same `BookMeta` + `Page[]` shape, so the engine works on anything. Books are
-stored as `books/<id>/book.json` in the app document directory; scanned page
-images go in `books/<id>/scans/`.
+the same `BookMeta` + `Page[]` shape. Books are stored as `books/<id>/book.json`
+in the app document directory; page photos in `books/<id>/images/`.
 
-### The Claude call (Phase 2)
-One vision request per page. The page image (base64, resized to ~1568px) plus a
-tutor system prompt, with `output_config.format` set to a JSON schema that forces
-the lesson structure — no fragile parsing. Sentence IDs are assigned on-device
-after the response, keeping them globally unique. Key lives in `expo-secure-store`
-and the request goes straight to `api.anthropic.com` (React Native isn't a
-browser, so no CORS / no backend). Model is user-selectable; you pay your own usage.
+### The Claude call
+- **API-key path:** one vision request per page with `output_config.format` set
+  to a JSON schema that forces the lesson structure — no fragile parsing. The
+  key lives in `expo-secure-store`; the request goes straight to
+  `api.anthropic.com` (React Native isn't a browser, so no backend/CORS). Model
+  is user-selectable (Sonnet 4.6 by default; Opus 4.8 available).
+- **Bridge path:** the laptop runs Claude Code headless under your Max plan, in
+  two committed stages (transcribe → enrich) with the work archived to disk and
+  resumable. Fully documented in [`bridge/README.md`](bridge/README.md).
 
 ---
 
 ## Copyright note
-Dik Trom is public domain in the EU (Kieviet died 1931). The text here is a
+Dik Trom is public domain in the EU (Kieviet died 1931). The bundled text is a
 modern-Dutch rephrasing — a derivative work — with the 1899 phrasing preserved in
-the grammar notes. The capture engine is content-agnostic: point it at any
-public-domain or rights-cleared text.
+the grammar notes. The engine is content-agnostic: point it at any public-domain
+or rights-cleared text.

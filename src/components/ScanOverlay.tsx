@@ -16,6 +16,7 @@ import { colors, fonts, radius, spacing } from "../theme/theme";
 export type ScanPhase =
   | { k: "working"; label: string }
   | { k: "error"; message: string }
+  | { k: "queued"; page: number }
   | { k: "done"; pageIdx: number };
 
 interface Props {
@@ -42,6 +43,25 @@ export default function ScanOverlay({
               <ActivityIndicator size="large" color={colors.accent} />
               <Text style={styles.label}>{phase.label}</Text>
               <Text style={styles.hint}>This takes a few seconds.</Text>
+            </>
+          )}
+
+          {phase?.k === "queued" && (
+            <>
+              <Feather name="upload-cloud" size={36} color={colors.good} />
+              <Text style={styles.label}>Page {phase.page} queued</Text>
+              <Text style={styles.hint}>
+                It&rsquo;s processing on the laptop. Pull it into your book with
+                &ldquo;Sync from bridge&rdquo; when it&rsquo;s ready — you don&rsquo;t need to wait.
+              </Text>
+              <View style={styles.row}>
+                <Pressable style={styles.ghostBtn} onPress={onScanAnother}>
+                  <Text style={styles.ghostText}>Scan another</Text>
+                </Pressable>
+                <Pressable style={styles.solidBtn} onPress={onCancel}>
+                  <Text style={styles.solidText}>Done</Text>
+                </Pressable>
+              </View>
             </>
           )}
 

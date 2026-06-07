@@ -23,3 +23,6 @@ yarn-error.*
 
 # local env / secrets
 .env*.local
+
+# Bridge-archived scan artifacts (book pages, lessons, formatted HTML)
+projects/

@@ -10,7 +10,9 @@ const SOURCE_SLOT = "translation_source";
 const BRIDGE_SLOT = "bridge_url";
 
 export type ModelChoice = "claude-opus-4-8" | "claude-sonnet-4-6";
-export const DEFAULT_MODEL: ModelChoice = "claude-opus-4-8";
+// Sonnet is the default: for scan + translate it's much faster than Opus with
+// no meaningful quality loss at A2. Pick Opus in Settings for hard pages.
+export const DEFAULT_MODEL: ModelChoice = "claude-sonnet-4-6";
 
 // Where translations are produced: the paid API, or a local Claude Code bridge
 // running on your laptop (powered by a Max subscription).

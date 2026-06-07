@@ -12,6 +12,7 @@ import {
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
 import type { Sentence } from "../data/schema";
+import { normWord } from "../storage/wordlist";
 import { colors, fonts, radius, spacing } from "../theme/theme";
 
 interface Props {
@@ -20,9 +21,11 @@ interface Props {
   learned: boolean;
   slow: boolean;
   speakingId: string | null;
+  savedWords: Set<string>; // normalised keys of words saved to the study list
   onSpeak: (text: string, id: string) => void;
   onToggleSlow: () => void;
   onToggleLearned: () => void;
+  onToggleWord: (word: { nl: string; en: string }) => void;
   onClose: () => void;
 }
 
@@ -32,9 +35,11 @@ export default function SentenceSheet({
   learned,
   slow,
   speakingId,
+  savedWords,
   onSpeak,
   onToggleSlow,
   onToggleLearned,
+  onToggleWord,
   onClose,
 }: Props) {
   const visible = !!sentence;
@@ -103,26 +108,38 @@ export default function SentenceSheet({
               {/* Word by word */}
               {sentence.words.length > 0 && (
                 <>
-                  <Text style={styles.sectionLabel}>Word by word — tap to hear</Text>
+                  <Text style={styles.sectionLabel}>Word by word — tap to hear, bookmark to save</Text>
                   <View style={styles.wordList}>
                     {sentence.words.map((w, i) => {
                       const id = `word-${i}`;
                       const playing = speakingId === id;
+                      const saved = savedWords.has(normWord(w.nl));
                       return (
-                        <Pressable
+                        <View
                           key={id}
                           style={[styles.wordRow, playing && styles.wordRowActive]}
-                          onPress={() => onSpeak(w.nl, id)}
                         >
-                          <Text style={styles.wordNl}>{w.nl}</Text>
-                          <Text style={styles.wordEn}>{w.en}</Text>
-                          <Feather
-                            name="volume-2"
-                            size={14}
-                            color={playing ? colors.accent : colors.rule}
-                            style={{ marginLeft: spacing(2) }}
-                          />
-                        </Pressable>
+                          <Pressable style={styles.wordTap} onPress={() => onSpeak(w.nl, id)}>
+                            <Text style={styles.wordNl}>{w.nl}</Text>
+                            <Text style={styles.wordEn}>{w.en}</Text>
+                            <Feather
+                              name="volume-2"
+                              size={14}
+                              color={playing ? colors.accent : colors.rule}
+                            />
+                          </Pressable>
+                          <Pressable
+                            hitSlop={8}
+                            style={styles.bookmarkBtn}
+                            onPress={() => onToggleWord({ nl: w.nl, en: w.en })}
+                          >
+                            <Feather
+                              name="bookmark"
+                              size={18}
+                              color={saved ? colors.accent : colors.rule}
+                            />
+                          </Pressable>
+                        </View>
                       );
                     })}
                   </View>
@@ -245,10 +262,17 @@ const styles = StyleSheet.create({
   wordRow: {
     flexDirection: "row",
     alignItems: "center",
-    paddingVertical: spacing(2.5),
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.rule,
   },
+  wordTap: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing(2),
+    paddingVertical: spacing(2.5),
+  },
+  bookmarkBtn: { paddingVertical: spacing(2.5), paddingLeft: spacing(3) },
   wordRowActive: { backgroundColor: colors.accentSoft },
   wordNl: {
     fontFamily: fonts.bodyMedium,

@@ -2,7 +2,7 @@
 // learned-progress, and the tap-to-translate sheet. Audio uses native voices.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
@@ -14,6 +14,7 @@ import {
   saveLastPageIdx,
   saveLearned,
 } from "../../src/storage/progress";
+import { loadWordlist, savedKeys, toggleWord } from "../../src/storage/wordlist";
 import { onSpeakingChange, speak, stop } from "../../src/audio/speech";
 import SentenceSheet from "../../src/components/SentenceSheet";
 import { colors, fonts, radius, spacing } from "../../src/theme/theme";
@@ -26,6 +27,7 @@ export default function ReaderScreen() {
   const [pageIdx, setPageIdx] = useState(0);
   const [active, setActive] = useState<Sentence | null>(null);
   const [learned, setLearned] = useState<Set<string>>(new Set());
+  const [savedWords, setSavedWords] = useState<Set<string>>(new Set());
   const [slow, setSlow] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
   const hydrated = useRef(false);
@@ -46,6 +48,11 @@ export default function ReaderScreen() {
       }
     })();
   }, [id, start]);
+
+  // Load this book's saved word list (per book, not per page).
+  useEffect(() => {
+    if (id) loadWordlist(id).then((items) => setSavedWords(savedKeys(items)));
+  }, [id]);
 
   const page = book?.pages[pageIdx] ?? null;
   const lang = book?.meta.language ?? "nl-NL";
@@ -92,6 +99,12 @@ export default function ReaderScreen() {
     });
   }
 
+  async function onToggleWord(w: { nl: string; en: string }) {
+    if (!book) return;
+    const next = await toggleWord(book.id, w, page?.page);
+    setSavedWords(savedKeys(next));
+  }
+
   function goTo(idx: number) {
     if (!book) return;
     stop();
@@ -131,6 +144,9 @@ export default function ReaderScreen() {
         contentContainerStyle={styles.page}
         showsVerticalScrollIndicator={false}
       >
+        {page.imageUri ? (
+          <Image source={{ uri: page.imageUri }} style={styles.pageImage} resizeMode="cover" />
+        ) : null}
         {page.title ? <Text style={styles.chapterTitle}>{page.title}</Text> : null}
         {page.preamble ? <Text style={styles.preamble}>{page.preamble}</Text> : null}
 
@@ -155,6 +171,7 @@ export default function ReaderScreen() {
                   >
                     <Text style={styles.dropCap}>{first}</Text>
                     {rest + " "}
+                    {isLearned ? <Text style={styles.learnedCheck}>{"✓ "}</Text> : null}
                   </Text>
                 );
               }
@@ -169,6 +186,7 @@ export default function ReaderScreen() {
                   ]}
                 >
                   {s.dutch + " "}
+                  {isLearned ? <Text style={styles.learnedCheck}>{"✓ "}</Text> : null}
                 </Text>
               );
             })}
@@ -196,9 +214,11 @@ export default function ReaderScreen() {
         learned={active ? learned.has(active.id) : false}
         slow={slow}
         speakingId={speakingId}
+        savedWords={savedWords}
         onSpeak={onSpeak}
         onToggleSlow={() => setSlow((v) => !v)}
         onToggleLearned={toggleLearned}
+        onToggleWord={onToggleWord}
         onClose={() => {
           stop();
           setActive(null);
@@ -339,6 +359,13 @@ const styles = StyleSheet.create({
   navText: { fontFamily: fonts.ui, fontSize: 14, color: colors.accent },
   navCount: { fontFamily: fonts.ui, fontSize: 13, color: colors.inkSoft },
   page: { paddingHorizontal: spacing(6), paddingVertical: spacing(4) },
+  pageImage: {
+    width: "100%",
+    height: 240,
+    borderRadius: radius.md,
+    marginBottom: spacing(5),
+    backgroundColor: colors.paperSoft,
+  },
   chapterTitle: {
     fontFamily: fonts.displayBold,
     fontSize: 24,
@@ -364,6 +391,7 @@ const styles = StyleSheet.create({
   sentence: { color: colors.ink },
   sentenceActive: { backgroundColor: colors.accentSoft },
   sentenceLearned: { color: colors.inkSoft },
+  learnedCheck: { color: colors.good, fontFamily: fonts.uiRegular, fontSize: 14 },
   dropCap: {
     fontFamily: fonts.displayBold,
     fontSize: 40,

@@ -20,6 +20,12 @@ function bookFile(id: string) {
 export function scansDir(id: string) {
   return `${bookDir(id)}scans/`;
 }
+export function pageImagePath(id: string, pageNum: number) {
+  return `${bookDir(id)}images/Page${pageNum}.jpg`;
+}
+export async function ensureImagesDir(id: string) {
+  await ensureDir(`${bookDir(id)}images/`);
+}
 
 async function ensureDir(path: string) {
   const info = await FileSystem.getInfoAsync(path);
@@ -58,6 +64,7 @@ export async function listBooks(): Promise<BookSummary[]> {
         id: book.id,
         title: book.meta.title,
         author: book.meta.author,
+        status: book.meta.status ?? "open",
         pageCount: book.pages.length,
         updatedAt: book.updatedAt,
       });
@@ -85,8 +92,30 @@ export async function createBook(meta: BookMeta): Promise<Book> {
   await ensureDir(BOOKS_DIR);
   const id = slugify(meta.title) || `book-${Date.now()}`;
   const now = Date.now();
-  const book: Book = { id, meta, pages: [], createdAt: now, updatedAt: now };
+  const book: Book = {
+    id,
+    meta: {
+      ...meta,
+      status: meta.status ?? "open",
+      targetLanguage: meta.targetLanguage ?? "English",
+    },
+    pages: [],
+    createdAt: now,
+    updatedAt: now,
+  };
   await ensureDir(scansDir(id));
+  await saveBook(book);
+  return book;
+}
+
+// Update editable metadata (author, status, …) for a book.
+export async function updateBookMeta(
+  id: string,
+  patch: Partial<BookMeta>,
+): Promise<Book | null> {
+  const book = await getBook(id);
+  if (!book) return null;
+  book.meta = { ...book.meta, ...patch };
   await saveBook(book);
   return book;
 }
@@ -110,6 +139,70 @@ export async function appendPage(
   book.pages.push(withIds);
   await saveBook(book);
   return book;
+}
+
+// Insert or replace a page at a specific page number — used when syncing pages
+// the bridge already produced, so the app keeps the bridge's page numbering.
+export async function upsertPage(
+  id: string,
+  pageNumber: number,
+  page: Omit<Page, "page">,
+): Promise<Book | null> {
+  const book = await getBook(id);
+  if (!book) return null;
+  const withIds: Page = {
+    ...page,
+    page: pageNumber,
+    paragraphs: page.paragraphs.map((para, pi) =>
+      para.map((s, si) => ({ ...s, id: `p${pageNumber}-pg${pi}-s${si}` })),
+    ),
+  };
+  const idx = book.pages.findIndex((p) => p.page === pageNumber);
+  if (idx >= 0) book.pages[idx] = withIds;
+  else {
+    book.pages.push(withIds);
+    book.pages.sort((a, b) => a.page - b.page);
+  }
+  await saveBook(book);
+  return book;
+}
+
+// Re-label a page to a different number (e.g. fix "Page 1" that's really book
+// page 7). Sentence ids are intentionally left unchanged — they're opaque and
+// the learned-progress set references them by id, so they stay matched.
+export async function renumberPage(
+  id: string,
+  oldNum: number,
+  newNum: number,
+): Promise<Book | null> {
+  const book = await getBook(id);
+  if (!book) return null;
+  if (oldNum === newNum) return book;
+  const page = book.pages.find((p) => p.page === oldNum);
+  if (!page) throw new Error(`Page ${oldNum} not found.`);
+  if (book.pages.some((p) => p.page === newNum)) {
+    throw new Error(`Page ${newNum} already exists in this book.`);
+  }
+  page.page = newNum;
+  book.pages.sort((a, b) => a.page - b.page);
+  await saveBook(book);
+  return book;
+}
+
+// Set a page's local image path without touching its content (so learned
+// progress / sentence ids stay intact). Used to backfill artwork on existing pages.
+export async function setPageImage(
+  id: string,
+  pageNum: number,
+  imageUri: string,
+): Promise<void> {
+  const book = await getBook(id);
+  if (!book) return;
+  const p = book.pages.find((pp) => pp.page === pageNum);
+  if (p) {
+    p.imageUri = imageUri;
+    await saveBook(book);
+  }
 }
 
 export async function deleteBook(id: string): Promise<void> {
