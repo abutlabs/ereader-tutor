@@ -9,7 +9,11 @@ import {
   Spectral_400Regular_Italic,
 } from "@expo-google-fonts/spectral";
 import { Fraunces_600SemiBold, Fraunces_700Bold } from "@expo-google-fonts/fraunces";
-import { DMSans_400Regular, DMSans_500Medium } from "@expo-google-fonts/dm-sans";
+import {
+  DMSans_400Regular,
+  DMSans_500Medium,
+  DMSans_700Bold,
+} from "@expo-google-fonts/dm-sans";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { colors } from "../src/theme/theme";
 
@@ -24,6 +28,7 @@ export default function RootLayout() {
     Fraunces_700Bold,
     DMSans_400Regular,
     DMSans_500Medium,
+    DMSans_700Bold,
   });
 
   useEffect(() => {

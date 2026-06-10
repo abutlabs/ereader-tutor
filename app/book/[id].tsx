@@ -216,6 +216,7 @@ export default function BookScreen() {
         title=""
         onBack={() => router.back()}
         onEdit={() => router.push(`/edit/${book.id}`)}
+        onExport={() => router.push(`/export/${book.id}`)}
       />
       <ScrollView contentContainerStyle={{ padding: spacing(5) }}>
         <Text style={styles.kicker}>{book.meta.author}</Text>
@@ -324,10 +325,12 @@ function Header({
   title,
   onBack,
   onEdit,
+  onExport,
 }: {
   title: string;
   onBack: () => void;
   onEdit?: () => void;
+  onExport?: () => void;
 }) {
   return (
     <View style={styles.header}>
@@ -335,13 +338,20 @@ function Header({
         <Feather name="chevron-left" size={26} color={colors.ink} />
       </Pressable>
       <Text style={styles.headerTitle}>{title}</Text>
-      {onEdit ? (
-        <Pressable onPress={onEdit} hitSlop={10}>
-          <Feather name="edit-2" size={20} color={colors.inkSoft} />
-        </Pressable>
-      ) : (
-        <View style={{ width: 26 }} />
-      )}
+      <View style={{ flexDirection: "row", alignItems: "center", gap: spacing(4) }}>
+        {onExport && (
+          <Pressable onPress={onExport} hitSlop={10}>
+            <Feather name="share" size={19} color={colors.inkSoft} />
+          </Pressable>
+        )}
+        {onEdit ? (
+          <Pressable onPress={onEdit} hitSlop={10}>
+            <Feather name="edit-2" size={20} color={colors.inkSoft} />
+          </Pressable>
+        ) : (
+          <View style={{ width: 20 }} />
+        )}
+      </View>
     </View>
   );
 }

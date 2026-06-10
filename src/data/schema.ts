@@ -42,13 +42,19 @@ export interface Chapter {
 // once every page is in and set up as a lesson. Marking complete builds an index.
 export type BookStatus = "open" | "complete";
 
+// How a book entered the library.
+export type BookOrigin = "scan" | "epub" | "import";
+
 export interface BookMeta {
   title: string;
   author: string;
-  language: string; // BCP-47 of the SOURCE language being read, e.g. "nl-NL"
-  targetLanguage?: string; // language lessons are written in (learner's own); defaults to "English"
+  language: string; // BCP-47 of the book's SOURCE language, e.g. "nl-NL"
+  readingLang?: string; // language to read in (EPUB: may differ from source → translated)
+  targetLanguage?: string; // tutor language — translations/notes written in this; defaults to "English"
+  level?: string; // CEFR level (A1…C1) for EPUB rephrasing/notes depth
+  origin?: BookOrigin; // scan | epub | import
   status?: BookStatus; // defaults to "open" when absent
-  source?: string;
+  source?: string; // free-text provenance / rights note
   chapters?: Chapter[];
 }
 
