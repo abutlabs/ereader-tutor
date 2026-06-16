@@ -23,6 +23,14 @@ yarn-error.*
 
 # local env / secrets
 .env*.local
+# Google Play submit key (used by `eas submit`) — never commit
+play-service-account.json
+*.keystore
+
+# python venvs (narrator TTS)
+.venv*/
+bridge/.venv*/
+__pycache__/
 
 # Bridge-archived scan artifacts (book pages, lessons, formatted HTML)
 projects/

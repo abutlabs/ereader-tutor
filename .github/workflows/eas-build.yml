@@ -1,0 +1,66 @@
+name: EAS Build (Android)
+
+# Builds an installable Android binary on Expo's cloud (EAS Build).
+#   • preview    → APK you sideload onto a device / hand to beta testers
+#   • production → AAB for the Play Store
+#
+# Trigger it manually from the Actions tab (pick a profile), or by pushing a
+# version tag like v0.1.0 (builds production).
+#
+# Requires one repo secret: EXPO_TOKEN — an Expo access token
+# (expo.dev → Account → Settings → Access tokens). The app must already be linked
+# to an EAS project (run `eas init` once locally; it writes extra.eas.projectId
+# into app.json and that commit must be on the branch you build).
+
+on:
+  workflow_dispatch:
+    inputs:
+      profile:
+        description: "EAS build profile"
+        type: choice
+        options:
+          - preview
+          - production
+        default: preview
+  push:
+    tags:
+      - "v*"
+
+jobs:
+  build:
+    name: Build Android (${{ github.event.inputs.profile || 'production' }})
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Set up EAS
+        uses: expo/expo-github-action@v8
+        with:
+          eas-version: latest
+          token: ${{ secrets.EXPO_TOKEN }}
+
+      - name: Fail early if EXPO_TOKEN is missing
+        if: ${{ secrets.EXPO_TOKEN == '' }}
+        run: |
+          echo "::error::EXPO_TOKEN secret is not set. Add it in Settings → Secrets and variables → Actions."
+          exit 1
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Build on EAS
+        run: |
+          PROFILE="${{ github.event.inputs.profile }}"
+          PROFILE="${PROFILE:-production}"
+          echo "Building Android with profile: $PROFILE"
+          eas build --platform android --profile "$PROFILE" --non-interactive
