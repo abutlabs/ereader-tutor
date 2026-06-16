@@ -54,6 +54,11 @@ export async function toggleWord(
   return next;
 }
 
+// Replace the whole list (used when importing a book package).
+export async function replaceWordlist(bookId: string, items: SavedWord[]): Promise<void> {
+  await save(bookId, Array.isArray(items) ? items : []);
+}
+
 export async function removeWord(bookId: string, nl: string): Promise<SavedWord[]> {
   const items = await loadWordlist(bookId);
   const next = items.filter((it) => normWord(it.nl) !== normWord(nl));

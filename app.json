@@ -54,7 +54,8 @@
           "photosPermission": "Pick a photo of a book page to turn into a Dutch lesson.",
           "cameraPermission": "Scan book pages to turn them into Dutch lessons."
         }
-      ]
+      ],
+      "expo-audio"
     ],
     "experiments": {
       "typedRoutes": false

@@ -6,10 +6,17 @@
 // (documentDirectory, read/writeAsStringAsync, makeDirectory…) live under /legacy.
 import * as FileSystem from "expo-file-system/legacy";
 import type { Book, BookSummary, BookMeta, Page } from "../data/schema";
-import { BOOK_META, BOOK_PAGES } from "../data/dikTrom";
+import { CATALOG, CATALOG_IDS } from "../data/catalog";
 
 const BOOKS_DIR = FileSystem.documentDirectory + "books/";
-const SEED_FLAG = "dik-trom"; // id of the bundled seed book
+
+// Every bundled book is written to disk on first launch so the reader/progress
+// work the same for all of them; an entitlement (src/storage/entitlements) gates
+// which ones the library actually shows. Bundled ids are protected from deletion.
+const SEED_BOOKS: { id: string; meta: BookMeta; pages: Page[] }[] = CATALOG.map(
+  (c) => ({ id: c.id, meta: c.meta, pages: c.pages }),
+);
+const SEED_IDS = CATALOG_IDS;
 
 function bookDir(id: string) {
   return `${BOOKS_DIR}${id}/`;
@@ -26,6 +33,12 @@ export function pageImagePath(id: string, pageNum: number) {
 export async function ensureImagesDir(id: string) {
   await ensureDir(`${bookDir(id)}images/`);
 }
+export function pageAudioDir(id: string, pageNum: number) {
+  return `${bookDir(id)}audio/Page${pageNum}/`;
+}
+export async function ensurePageAudioDir(id: string, pageNum: number) {
+  await ensureDir(pageAudioDir(id, pageNum));
+}
 
 async function ensureDir(path: string) {
   const info = await FileSystem.getInfoAsync(path);
@@ -36,19 +49,14 @@ async function ensureDir(path: string) {
 
 async function ensureSeeded() {
   await ensureDir(BOOKS_DIR);
-  const seedPath = bookFile(SEED_FLAG);
-  const info = await FileSystem.getInfoAsync(seedPath);
-  if (!info.exists) {
+  for (const { id, meta, pages } of SEED_BOOKS) {
+    const seedPath = bookFile(id);
+    const info = await FileSystem.getInfoAsync(seedPath);
+    if (info.exists) continue;
     const now = Date.now();
-    const seed: Book = {
-      id: SEED_FLAG,
-      meta: BOOK_META,
-      pages: BOOK_PAGES,
-      createdAt: now,
-      updatedAt: now,
-    };
-    await ensureDir(bookDir(SEED_FLAG));
-    await ensureDir(scansDir(SEED_FLAG));
+    const seed: Book = { id, meta, pages, createdAt: now, updatedAt: now };
+    await ensureDir(bookDir(id));
+    await ensureDir(scansDir(id));
     await FileSystem.writeAsStringAsync(seedPath, JSON.stringify(seed));
   }
 }
@@ -205,8 +213,33 @@ export async function setPageImage(
   }
 }
 
+// Attach narrated-audio file paths to a page's sentences by (paragraph, sentence)
+// index, without touching ids or content. Keys are "pg<para>_s<sent>", matching
+// the bridge narrator's file names. Used to backfill audio on existing pages.
+export async function setPageAudio(
+  id: string,
+  pageNum: number,
+  uris: Map<string, string>,
+): Promise<void> {
+  const book = await getBook(id);
+  if (!book) return;
+  const p = book.pages.find((pp) => pp.page === pageNum);
+  if (!p) return;
+  let changed = false;
+  p.paragraphs.forEach((para, pi) =>
+    para.forEach((s, si) => {
+      const uri = uris.get(`pg${pi}_s${si}`);
+      if (uri && s.audioUrl !== uri) {
+        s.audioUrl = uri;
+        changed = true;
+      }
+    }),
+  );
+  if (changed) await saveBook(book);
+}
+
 export async function deleteBook(id: string): Promise<void> {
-  if (id === SEED_FLAG) return; // keep the bundled sample
+  if (SEED_IDS.has(id)) return; // keep bundled books
   await FileSystem.deleteAsync(bookDir(id), { idempotent: true });
 }
 

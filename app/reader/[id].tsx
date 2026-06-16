@@ -9,15 +9,23 @@ import { Feather } from "@expo/vector-icons";
 import type { Book, Sentence } from "../../src/data/schema";
 import { getBook } from "../../src/storage/books";
 import {
+  type DailyState,
+  loadDaily,
   loadLastPageIdx,
   loadLearned,
+  recordLearned,
   saveLastPageIdx,
   saveLearned,
 } from "../../src/storage/progress";
 import { loadWordlist, savedKeys, toggleWord } from "../../src/storage/wordlist";
 import { onSpeakingChange, speak, stop } from "../../src/audio/speech";
 import SentenceSheet from "../../src/components/SentenceSheet";
+import Ring from "../../src/components/Ring";
+import Flame from "../../src/components/Flame";
+import SessionComplete from "../../src/components/SessionComplete";
 import { colors, fonts, radius, spacing } from "../../src/theme/theme";
+
+const FOCUS_DIM = 0.32; // opacity of non-active text while a sentence is focused
 
 export default function ReaderScreen() {
   const { id, start } = useLocalSearchParams<{ id: string; start?: string }>();
@@ -30,8 +38,14 @@ export default function ReaderScreen() {
   const [savedWords, setSavedWords] = useState<Set<string>>(new Set());
   const [slow, setSlow] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [daily, setDaily] = useState<DailyState | null>(null);
+  const [sessionDone, setSessionDone] = useState(false);
   const hydrated = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
+
+  useEffect(() => {
+    loadDaily().then(setDaily);
+  }, []);
 
   // Load book once; pick the initial page from `start`, else the saved position.
   useEffect(() => {
@@ -87,16 +101,26 @@ export default function ReaderScreen() {
   const doneCount = allSentences.filter((s) => learned.has(s.id)).length;
 
   function onSpeak(text: string, localId: string) {
-    speak(text, localId, { language: lang, slow });
+    // The sentence button prefers the bridge-narrated recording once synced;
+    // word taps stay on the native voice (only sentences are narrated).
+    const audioUrl = localId === "sentence" ? active?.audioUrl : undefined;
+    speak(text, localId, { language: lang, slow, audioUrl });
   }
 
-  function toggleLearned() {
+  async function toggleLearned() {
     if (!active) return;
+    const wasLearned = learned.has(active.id);
     setLearned((prev) => {
       const next = new Set(prev);
-      next.has(active.id) ? next.delete(active.id) : next.add(active.id);
+      wasLearned ? next.delete(active.id) : next.add(active.id);
       return next;
     });
+    // Count momentum only on a fresh learn; fire Session Complete on the goal.
+    if (!wasLearned) {
+      const d = await recordLearned();
+      setDaily(d);
+      if (d.justCompleted) setSessionDone(true);
+    }
   }
 
   async function onToggleWord(w: { nl: string; en: string }) {
@@ -115,20 +139,22 @@ export default function ReaderScreen() {
   if (!book || !page) {
     return (
       <SafeAreaView style={styles.safe}>
-        <ReaderHeader title="" onBack={() => router.back()} progress="" />
+        <ReaderHeader title="" onBack={() => router.back()} daily={null} />
         <Text style={styles.loading}>Loading…</Text>
       </SafeAreaView>
     );
   }
 
   const total = book.pages.length;
+  const focusing = active != null;
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       <ReaderHeader
         title={book.meta.title}
+        subtitle={`${page.title ? page.title + " · " : ""}p.${page.page}`}
         onBack={() => router.back()}
-        progress={`${doneCount}/${allSentences.length} learned`}
+        daily={daily}
       />
 
       {/* Top page nav */}
@@ -145,10 +171,18 @@ export default function ReaderScreen() {
         showsVerticalScrollIndicator={false}
       >
         {page.imageUri ? (
-          <Image source={{ uri: page.imageUri }} style={styles.pageImage} resizeMode="cover" />
+          <Image
+            source={{ uri: page.imageUri }}
+            style={[styles.pageImage, focusing && styles.dim]}
+            resizeMode="cover"
+          />
         ) : null}
-        {page.title ? <Text style={styles.chapterTitle}>{page.title}</Text> : null}
-        {page.preamble ? <Text style={styles.preamble}>{page.preamble}</Text> : null}
+        {page.title ? (
+          <Text style={[styles.chapterTitle, focusing && styles.dim]}>{page.title}</Text>
+        ) : null}
+        {page.preamble ? (
+          <Text style={[styles.preamble, focusing && styles.dim]}>{page.preamble}</Text>
+        ) : null}
 
         {page.paragraphs.map((para, pi) => (
           <Text key={pi} style={styles.paragraph}>
@@ -166,6 +200,7 @@ export default function ReaderScreen() {
                     style={[
                       styles.sentence,
                       isLearned && styles.sentenceLearned,
+                      focusing && !isActive && styles.dim,
                       isActive && styles.sentenceActive,
                     ]}
                   >
@@ -182,6 +217,7 @@ export default function ReaderScreen() {
                   style={[
                     styles.sentence,
                     isLearned && styles.sentenceLearned,
+                    focusing && !isActive && styles.dim,
                     isActive && styles.sentenceActive,
                   ]}
                 >
@@ -224,28 +260,51 @@ export default function ReaderScreen() {
           setActive(null);
         }}
       />
+
+      <SessionComplete
+        visible={sessionDone}
+        goal={daily?.goal ?? 20}
+        streak={daily?.streak ?? 0}
+        onClose={() => setSessionDone(false)}
+      />
     </SafeAreaView>
   );
 }
 
 function ReaderHeader({
   title,
+  subtitle,
   onBack,
-  progress,
+  daily,
 }: {
   title: string;
+  subtitle?: string;
   onBack: () => void;
-  progress: string;
+  daily: DailyState | null;
 }) {
   return (
     <View style={styles.header}>
-      <Pressable onPress={onBack} hitSlop={10}>
-        <Feather name="book-open" size={22} color={colors.accent} />
+      <Pressable onPress={onBack} hitSlop={10} style={{ marginRight: spacing(1) }}>
+        <Feather name="chevron-left" size={24} color={colors.ink} />
       </Pressable>
-      <Text style={styles.headerTitle} numberOfLines={1}>
-        {title}
-      </Text>
-      <Text style={styles.headerProgress}>{progress}</Text>
+      <View style={{ flex: 1, minWidth: 0 }}>
+        <Text style={styles.headerTitle} numberOfLines={1}>
+          {title}
+        </Text>
+        {subtitle ? (
+          <Text style={styles.headerSub} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+      {daily && (
+        <View style={styles.headerRight}>
+          <Ring value={daily.count} total={daily.goal} size={42} stroke={4}>
+            <Text style={styles.headerRingCount}>{daily.count}</Text>
+          </Ring>
+          {daily.streak > 0 && <Flame n={daily.streak} soft />}
+        </View>
+      )}
     </View>
   );
 }
@@ -329,14 +388,17 @@ const styles = StyleSheet.create({
   header: {
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing(3),
+    gap: spacing(2),
     paddingHorizontal: spacing(4),
-    paddingVertical: spacing(3),
+    paddingVertical: spacing(2.5),
+    backgroundColor: colors.paperWarm,
     borderBottomWidth: StyleSheet.hairlineWidth,
-    borderBottomColor: colors.rule,
+    borderBottomColor: colors.ruleSoft,
   },
-  headerTitle: { fontFamily: fonts.display, fontSize: 16, color: colors.ink, flex: 1 },
-  headerProgress: { fontFamily: fonts.ui, fontSize: 12, color: colors.inkSoft },
+  headerTitle: { fontFamily: fonts.display, fontSize: 15.5, color: colors.ink },
+  headerSub: { fontFamily: fonts.ui, fontSize: 11, color: colors.inkFaint, marginTop: 1 },
+  headerRight: { flexDirection: "row", alignItems: "center", gap: spacing(2) },
+  headerRingCount: { fontFamily: fonts.uiBold, fontSize: 11, color: colors.ink },
   navRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -389,8 +451,13 @@ const styles = StyleSheet.create({
     marginBottom: spacing(4),
   },
   sentence: { color: colors.ink },
-  sentenceActive: { backgroundColor: colors.accentSoft },
+  sentenceActive: {
+    backgroundColor: colors.accentSoft,
+    textDecorationLine: "underline",
+    textDecorationColor: colors.accent,
+  },
   sentenceLearned: { color: colors.inkSoft },
+  dim: { opacity: 0.32 },
   learnedCheck: { color: colors.good, fontFamily: fonts.uiRegular, fontSize: 14 },
   dropCap: {
     fontFamily: fonts.displayBold,

@@ -8,13 +8,16 @@ import {
   Pressable,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import Constants from "expo-constants";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
+import { DEV_AVAILABLE, setDevMode, useDevMode } from "../src/storage/devMode";
 import {
   clearApiKey,
   DEFAULT_MODEL,
@@ -47,6 +50,7 @@ const SOURCES: { id: TranslationSource; label: string; sub: string }[] = [
 
 export default function SettingsScreen() {
   const router = useRouter();
+  const dev = useDevMode();
   const [source, setSourceState] = useState<TranslationSource>(DEFAULT_SOURCE);
   const [key, setKey] = useState("");
   const [hasStored, setHasStored] = useState(false);
@@ -131,6 +135,8 @@ export default function SettingsScreen() {
       </View>
 
       <ScrollView contentContainerStyle={{ padding: spacing(5) }}>
+        {dev && (
+        <>
         <Text style={styles.sectionLabel}>Translation source</Text>
         <Text style={styles.help}>
           Where scanned pages get turned into lessons.
@@ -264,6 +270,39 @@ export default function SettingsScreen() {
             />
           </Pressable>
         ))}
+        </>
+        )}
+
+        {!dev && (
+          <Text style={styles.help}>
+            You're all set — open a book from your library and start reading.
+          </Text>
+        )}
+
+        {/* Developer mode — only available when running from source. Off mirrors
+            exactly what a Play Store user sees. */}
+        {DEV_AVAILABLE && (
+          <View style={styles.devRow}>
+            <View style={{ flex: 1, paddingRight: spacing(4) }}>
+              <Text style={styles.modelLabel}>Developer mode</Text>
+              <Text style={styles.modelCost}>
+                Show scanning, the bridge and API tools. Turn off to preview the
+                Play Store experience.
+              </Text>
+            </View>
+            <Switch
+              value={dev}
+              onValueChange={setDevMode}
+              trackColor={{ true: colors.accent, false: colors.rule }}
+              thumbColor={colors.paper}
+            />
+          </View>
+        )}
+
+        <Text style={[styles.sectionLabel, { marginTop: spacing(8) }]}>About</Text>
+        <Text style={styles.help}>
+          EReader Tutor{"  "}v{Constants.expoConfig?.version ?? "0.1.0"}
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );
@@ -336,6 +375,14 @@ const styles = StyleSheet.create({
     borderColor: "transparent",
   },
   modelRowOn: { borderColor: colors.accent },
+  devRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.paperSoft,
+    borderRadius: radius.md,
+    padding: spacing(4),
+    marginTop: spacing(2),
+  },
   modelLabel: { fontFamily: fonts.bodyMedium, fontSize: 16, color: colors.ink },
   modelCost: {
     fontFamily: fonts.body,

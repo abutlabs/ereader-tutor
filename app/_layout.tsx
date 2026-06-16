@@ -9,14 +9,18 @@ import {
   Spectral_400Regular_Italic,
 } from "@expo-google-fonts/spectral";
 import { Fraunces_600SemiBold, Fraunces_700Bold } from "@expo-google-fonts/fraunces";
-import { DMSans_400Regular, DMSans_500Medium } from "@expo-google-fonts/dm-sans";
+import {
+  DMSans_400Regular,
+  DMSans_500Medium,
+  DMSans_700Bold,
+} from "@expo-google-fonts/dm-sans";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { colors } from "../src/theme/theme";
 
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const [loaded] = useFonts({
+  const [loaded, fontError] = useFonts({
     Spectral_400Regular,
     Spectral_500Medium,
     Spectral_400Regular_Italic,
@@ -24,13 +28,15 @@ export default function RootLayout() {
     Fraunces_700Bold,
     DMSans_400Regular,
     DMSans_500Medium,
+    DMSans_700Bold,
   });
 
   useEffect(() => {
-    if (loaded) SplashScreen.hideAsync();
-  }, [loaded]);
+    if (fontError) console.warn("Font loading failed:", fontError);
+    if (loaded || fontError) SplashScreen.hideAsync();
+  }, [loaded, fontError]);
 
-  if (!loaded) return null;
+  if (!loaded && !fontError) return null;
 
   return (
     <SafeAreaProvider>

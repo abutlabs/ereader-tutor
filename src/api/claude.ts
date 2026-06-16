@@ -213,6 +213,57 @@ export async function imageToLesson(
   return JSON.parse(textBlock.text) as LessonResult;
 }
 
+// ─── Text → lesson (EPUB "direct text" path) ─────────────────────────────────
+// Build a lesson from a passage of source text instead of a page image. When the
+// reading language differs from the source, the model translates first; notes and
+// the tutor side are written in the tutor language at the given CEFR level.
+function buildTextSystemPrompt(
+  sourceLang: string,
+  readingLang: string,
+  tutorLang: string,
+  level: string,
+): string {
+  const translating = readingLang.toLowerCase() !== sourceLang.toLowerCase();
+  const dutchRule = translating
+    ? `the sentence translated naturally into ${readingLang}, pitched at CEFR ${level}.`
+    : `the sentence in natural, modern ${readingLang} (lightly modernize archaic wording; preserve meaning).`;
+  return `You are an expert language tutor preparing study material from a book passage. The text's source language is ${sourceLang}; the learner reads in ${readingLang} and is explained to in ${tutorLang}; their level is CEFR ${level}. Write every explanation, translation, and note in ${tutorLang}.
+
+Work efficiently — this is transcription/translation, not a reasoning puzzle. Split the passage into paragraphs and sentences as they appear; one entry per sentence. For each sentence provide:
+- dutch: ${dutchRule}
+- english: a faithful, natural translation into ${tutorLang}.
+- words: a word/phrase-by-phrase breakdown. "nl" = the ${readingLang} word/phrase, "en" = its ${tutorLang} meaning.
+- notes: 1-4 short grammar/usage notes in ${tutorLang}, pitched at CEFR ${level}.
+
+The JSON keys are literally "dutch"/"english"/"nl"/"en" regardless of the languages — put the ${readingLang} text under "dutch"/"nl" and the ${tutorLang} text under "english"/"en". If a chapter heading is present, set pageTitle; otherwise null.`;
+}
+
+export async function textToLesson(
+  passage: string,
+  apiKey: string,
+  model: ModelChoice,
+  opts: { sourceLang: string; readingLang: string; tutorLang: string; level: string },
+): Promise<LessonResult> {
+  const json = await callMessages(
+    {
+      model,
+      max_tokens: 8000,
+      system: buildTextSystemPrompt(opts.sourceLang, opts.readingLang, opts.tutorLang, opts.level),
+      output_config: { format: { type: "json_schema", schema: LESSON_SCHEMA } },
+      messages: [
+        {
+          role: "user",
+          content: `Here is the passage. Produce the structured lesson for it.\n\n${passage}`,
+        },
+      ],
+    },
+    apiKey,
+  );
+  const textBlock = (json.content || []).find((b: any) => b.type === "text");
+  if (!textBlock?.text) throw new ClaudeError("No lesson returned from the model.");
+  return JSON.parse(textBlock.text) as LessonResult;
+}
+
 // ─── Local Claude Code bridge (Max plan) ──────────────────────────────────
 // Same LessonResult out; the laptop's Claude Code does the vision work, so no
 // API key is involved. See bridge/server.mjs.
@@ -278,6 +329,7 @@ export interface BridgePageInfo {
   sentences: number;
   pageTitle: string | null;
   detectedPage: number | null; // page number the model read off the printed page
+  audio?: boolean; // true once the bridge's narrator has finished this page
 }
 
 // Re-label a page on the bridge: rename its Page<old> folder to Page<new>.
@@ -347,6 +399,33 @@ export async function fetchBridgePageLesson(
     throw new ClaudeError("Bridge returned an unexpected page.");
   }
   return lesson as LessonResult;
+}
+
+// Fetch a page's narrated-audio manifest: "pg<para>_s<sent>" -> file name.
+// Returns null while the bridge hasn't narrated the page yet (404).
+export async function fetchBridgeAudioManifest(
+  bridgeUrl: string,
+  book: string,
+  page: number,
+): Promise<Record<string, string> | null> {
+  const res = await fetch(
+    `${bridgeUrl}/books/${encodeURIComponent(book)}/pages/${page}/audio`,
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new ClaudeError(`Bridge error ${res.status}`, res.status);
+  const json = await res.json();
+  return json?.files && typeof json.files === "object"
+    ? (json.files as Record<string, string>)
+    : null;
+}
+
+export function bridgeAudioFileUrl(
+  bridgeUrl: string,
+  book: string,
+  page: number,
+  file: string,
+): string {
+  return `${bridgeUrl}/books/${encodeURIComponent(book)}/pages/${page}/audio/${file}`;
 }
 
 // Convert a LessonResult into the reader's Page shape (minus page number, which
