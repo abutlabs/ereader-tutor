@@ -46,6 +46,14 @@ npx eas-cli@latest build -p android --profile preview
 
 ---
 
+## ⚠️ Before ANY Play Store release: remove beta-only content
+
+**Otje** (Annie M.G. Schmidt, d. 1995) is under copyright and is bundled for the
+private sideloaded beta only. Before submitting to Play:
+- delete `src/data/otje.ts`
+- delete the `otje` entry and the `./otje` import in `src/data/catalog.ts`
+- run `npm run typecheck` to confirm it's cleanly gone
+
 ## Later: Google Play Store
 
 Not needed for the sideloaded beta. When ready:

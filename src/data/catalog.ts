@@ -10,6 +10,9 @@ import type { BookMeta, Page } from "./schema";
 import { BOOK_META as DIK_META, BOOK_PAGES as DIK_PAGES } from "./dikTrom";
 import { FABLES_META, FABLES_PAGES } from "./fables";
 import { IDIOMS_META, IDIOMS_PAGES } from "./idioms";
+// BETA ONLY — under copyright. Remove this import + the catalog entry below
+// (and src/data/otje.ts) before any Play Store release.
+import { OTJE_META, OTJE_PAGES } from "./otje";
 
 export interface CatalogItem {
   id: string; // also the storage folder/slug
@@ -44,6 +47,15 @@ export const CATALOG: CatalogItem[] = [
     productId: "book_dik_trom",
     price: "$1.99",
     blurb: "De klassieke Nederlandse jongen — hoofdstuk 1 & 2.",
+  },
+  // ⚠️ BETA ONLY — "Otje" is under copyright. Delete this entry, the import above,
+  // and src/data/otje.ts before shipping to the Play Store.
+  {
+    id: "otje",
+    meta: OTJE_META,
+    pages: OTJE_PAGES,
+    access: "free",
+    blurb: "Otje — beta only, niet voor distributie.",
   },
 ];
 
