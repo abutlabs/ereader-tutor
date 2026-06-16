@@ -29,7 +29,11 @@
         "backgroundColor": "#f4f1ea"
       },
       "permissions": [
-        "CAMERA"
+        "android.permission.CAMERA"
+      ],
+      "blockedPermissions": [
+        "android.permission.RECORD_AUDIO",
+        "android.permission.MODIFY_AUDIO_SETTINGS"
       ]
     },
     "web": {
@@ -59,6 +63,13 @@
     ],
     "experiments": {
       "typedRoutes": false
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "de4633f4-d751-4218-84ca-3c2ce841f723"
+      }
+    },
+    "owner": "abutlabs-dev"
   }
 }
