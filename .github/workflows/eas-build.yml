@@ -1,16 +1,20 @@
 name: EAS Build (Android)
 
-# Builds an installable Android binary on Expo's cloud (EAS Build).
-#   • preview    → APK you sideload onto a device / hand to beta testers
-#   • production → AAB for the Play Store
+# Builds an Android binary on Expo's cloud (EAS Build), downloads it back to the
+# runner, and publishes it to GitHub:
+#   • every run  → a workflow Artifact (download from the run's summary page)
+#   • tag builds → also attached to the GitHub Release for that tag
 #
-# Trigger it manually from the Actions tab (pick a profile), or by pushing a
-# version tag like v0.1.0 (builds production).
+#   profile = preview    → APK (sideloadable beta)
+#   profile = production → AAB (for the Play Store)
 #
-# Requires one repo secret: EXPO_TOKEN — an Expo access token
-# (expo.dev → Account → Settings → Access tokens). The app must already be linked
-# to an EAS project (run `eas init` once locally; it writes extra.eas.projectId
-# into app.json and that commit must be on the branch you build).
+# NOTE: GitHub *Packages* has no APK package type, so the binary goes to Releases /
+# Artifacts instead — that's the supported way to host an app binary on GitHub.
+#
+# Trigger manually (Actions tab → Run workflow → pick a profile), or push a tag like
+# v0.1.0-beta.1 (builds production + creates/updates that Release).
+#
+# Requires repo secret EXPO_TOKEN (expo.dev → Account → Settings → Access tokens).
 
 on:
   workflow_dispatch:
@@ -26,9 +30,12 @@ on:
     tags:
       - "v*"
 
+permissions:
+  contents: write # needed to upload assets to a Release
+
 jobs:
   build:
-    name: Build Android (${{ github.event.inputs.profile || 'production' }})
+    name: Build & publish Android (${{ github.event.inputs.profile || 'production' }})
     runs-on: ubuntu-latest
     steps:
       - name: Check out
@@ -58,9 +65,49 @@ jobs:
       - name: Typecheck
         run: npm run typecheck
 
-      - name: Build on EAS
+      - name: Resolve build profile
+        id: cfg
         run: |
           PROFILE="${{ github.event.inputs.profile }}"
           PROFILE="${PROFILE:-production}"
-          echo "Building Android with profile: $PROFILE"
-          eas build --platform android --profile "$PROFILE" --non-interactive
+          echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"
+          if [ "$PROFILE" = "production" ]; then
+            echo "ext=aab" >> "$GITHUB_OUTPUT"
+          else
+            echo "ext=apk" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build on EAS (wait) and capture the artifact URL
+        id: build
+        run: |
+          set -o pipefail
+          eas build \
+            --platform android \
+            --profile "${{ steps.cfg.outputs.profile }}" \
+            --non-interactive --json --wait | tee build.json
+          URL="$(jq -r '.[0].artifacts.applicationArchiveUrl // .[0].artifacts.buildUrl' build.json)"
+          if [ -z "$URL" ] || [ "$URL" = "null" ]; then
+            echo "::error::Could not find a downloadable artifact URL in the EAS build output."
+            exit 1
+          fi
+          echo "url=$URL" >> "$GITHUB_OUTPUT"
+
+      - name: Download the binary from EAS
+        run: |
+          NAME="ereader-tutor-${{ steps.cfg.outputs.profile }}.${{ steps.cfg.outputs.ext }}"
+          curl -fL -o "$NAME" "${{ steps.build.outputs.url }}"
+          ls -lh "$NAME"
+
+      - name: Upload as a workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ereader-tutor-${{ steps.cfg.outputs.profile }}
+          path: "ereader-tutor-*.${{ steps.cfg.outputs.ext }}"
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Attach to the GitHub Release (tag builds only)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: "ereader-tutor-*.${{ steps.cfg.outputs.ext }}"
