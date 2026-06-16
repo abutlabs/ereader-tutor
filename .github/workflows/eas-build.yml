@@ -37,6 +37,9 @@ jobs:
   build:
     name: Build & publish Android (${{ github.event.inputs.profile || 'production' }})
     runs-on: ubuntu-latest
+    env:
+      # `secrets` can't be used in step `if:` expressions, so expose it as env.
+      EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
     steps:
       - name: Check out
         uses: actions/checkout@v4
@@ -54,7 +57,7 @@ jobs:
           token: ${{ secrets.EXPO_TOKEN }}
 
       - name: Fail early if EXPO_TOKEN is missing
-        if: ${{ secrets.EXPO_TOKEN == '' }}
+        if: ${{ env.EXPO_TOKEN == '' }}
         run: |
           echo "::error::EXPO_TOKEN secret is not set. Add it in Settings → Secrets and variables → Actions."
           exit 1
