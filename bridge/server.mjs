@@ -42,12 +42,16 @@ const MODEL_ALIAS = {
   "claude-sonnet-4-6": "sonnet",
 };
 
-// Timestamped logging so you can watch each request in the terminal.
+// Timestamped logging so you can watch each request in the terminal. Log lines
+// scroll above the live job dashboard (see "Terminal dashboard" below), so every
+// write clears and repaints the dashboard block.
 function ts() {
   return new Date().toLocaleTimeString();
 }
 function log(...args) {
+  clearDash();
   console.log(`[${ts()}]`, ...args);
+  renderDash();
 }
 
 // Stage 1 — transcription only. Fast: just the source text, no translation.
@@ -64,10 +68,13 @@ Output ONLY a single minified JSON object, no markdown, no commentary, of exactl
 
 // Stage 2 — enrich the transcript into the full lesson (text-only, no image).
 // The JSON keys stay "dutch"/"english"/"nl"/"en" regardless of the languages.
-function enrichPrompt(sourceLanguage = "Dutch", targetLanguage = "English", transcript = {}) {
+// When the page is fanned out into chunks, each chunk gets only its own
+// paragraphs (partOfPage=true) and the merge step reassembles them in order.
+function enrichPrompt(sourceLanguage = "Dutch", targetLanguage = "English", transcript = {}, partOfPage = false) {
+  const scope = partOfPage ? "part of one book page" : "one book page";
   return `You are an expert ${sourceLanguage}-language tutor for an A2 learner whose own language is ${targetLanguage}. Write every translation, explanation, and note in ${targetLanguage}.
 
-Below is the transcribed ${sourceLanguage} text of one book page (paragraphs of sentences). For EACH sentence, produce a study entry — keep the same sentences in the same order.
+Below is the transcribed ${sourceLanguage} text of ${scope} (paragraphs of sentences). For EACH sentence, produce a study entry — keep the same sentences in the same order.
 
 Work efficiently: produce the JSON promptly without lengthy deliberation. For each sentence provide:
 - dutch: the sentence in natural, modern ${sourceLanguage} (you may lightly clean it; preserve meaning).
@@ -146,12 +153,14 @@ async function listBookPages(book) {
     const pageNum = Number(m[1]);
     const pdir = path.join(dir, e.name);
     let status = null;
+    let stage = null;
     let sentences = 0;
     let pageTitle = null;
     let detectedPage = null;
     try {
       const s = JSON.parse(await fs.readFile(path.join(pdir, "status.json"), "utf8"));
       status = s.status; // "queued" | "processing" | "done" | "error"
+      stage = s.stage ?? null; // "transcribing" | "transcribed" | "enriching" | "done"
       detectedPage = s.detectedPage ?? null;
     } catch {
       /* no status file (e.g. a migrated page) — infer from lesson.json below */
@@ -164,7 +173,10 @@ async function listBookPages(book) {
     } catch {
       if (!status) continue; // neither status.json nor lesson.json → skip
     }
-    pages.push({ page: pageNum, status, sentences, pageTitle, detectedPage });
+    const audio = await fs
+      .access(path.join(pdir, "audio", "manifest.json"))
+      .then(() => true, () => false);
+    pages.push({ page: pageNum, status, stage, sentences, pageTitle, detectedPage, audio });
   }
   pages.sort((a, b) => a.page - b.page);
   return pages;
@@ -337,6 +349,11 @@ function createJob(meta) {
     lesson: null,
     savedTo: null,
     error: null,
+    // Dashboard state: pipeline stage, output chars so far, stage-2 chunk progress.
+    stage: null,
+    chars: 0,
+    chunkDone: 0,
+    chunkTotal: 0,
   };
   jobs.set(id, job);
   return { id, job };
@@ -364,11 +381,14 @@ function sweepJobs() {
 }
 setInterval(sweepJobs, 60_000).unref();
 
-// ─── Processing queue ────────────────────────────────────────────────────────
-// Pages are accepted instantly (image + status stashed on disk) and processed by
-// a bounded pool — each page is its own `claude -p` run. Excess pages wait in the
-// queue (status "queued") so you can submit page 3 while page 2 is still going.
-const MAX_CONCURRENCY = Number(process.env.MAX_CONCURRENCY) || 2;
+// ─── Job launcher ────────────────────────────────────────────────────────────
+// Pages are accepted instantly (image + status stashed on disk) and each one
+// launches its own pipeline immediately — no serial queue. The work is
+// network-bound (`claude -p` barely touches local CPU), so the laptop isn't the
+// limit; Claude-side rate limits are, and those are handled with backoff in
+// runClaudeWithBackoff(). Set MAX_CONCURRENCY to bound parallel pages anyway
+// (excess pages then wait as "queued", exactly like the old pool).
+const MAX_CONCURRENCY = Number(process.env.MAX_CONCURRENCY) || Infinity;
 let active = 0;
 const queue = [];
 
@@ -386,6 +406,53 @@ function pump() {
     });
   }
 }
+
+// ─── Terminal dashboard ──────────────────────────────────────────────────────
+// A live block at the bottom of the terminal: one row per in-flight page, ticking
+// every second. Log lines scroll above it (log() clears and repaints the block).
+// TTY only — when output is piped or backgrounded, the tagged logs stand alone.
+let dashRows = 0;
+function clearDash() {
+  if (!process.stdout.isTTY || !dashRows) return;
+  process.stdout.write(`\x1b[${dashRows}A\x1b[J`); // up N rows, erase to end
+  dashRows = 0;
+}
+function fmtElapsed(ms) {
+  const s = Math.floor(ms / 1000);
+  return `${Math.floor(s / 60)}m${String(s % 60).padStart(2, "0")}s`;
+}
+function dashStage(j) {
+  if (j.status === "pending") return "queued";
+  if (j.stage === "transcribe") return "transcribing";
+  if (j.stage === "enrich") {
+    return j.chunkTotal > 1 ? `enriching ${j.chunkDone}/${j.chunkTotal} chunks` : "enriching";
+  }
+  if (j.stage === "narrate") {
+    return j.chunkTotal ? `♪ narrating ${j.chunkDone}/${j.chunkTotal}` : "♪ narrating (loading model)";
+  }
+  return "starting";
+}
+function buildDashRows() {
+  const live = [...jobs.values()].filter((j) => j.status === "pending" || j.status === "running");
+  if (!live.length) return [];
+  const rows = [`  ── ${live.length} active job${live.length === 1 ? "" : "s"} ${"─".repeat(40)}`];
+  for (const j of live) {
+    const chars = j.chars ? `  ${(j.chars / 1000).toFixed(1)}k chars` : "";
+    rows.push(
+      `  ${safeBookName(j.book)} p${j.page}  ▸ ${dashStage(j)}  ${fmtElapsed(Date.now() - j.startedAt)}${chars}`,
+    );
+  }
+  return rows;
+}
+function renderDash() {
+  if (!process.stdout.isTTY) return;
+  clearDash();
+  const rows = buildDashRows();
+  if (!rows.length) return;
+  process.stdout.write(rows.join("\n") + "\n");
+  dashRows = rows.length;
+}
+setInterval(renderDash, 1000).unref();
 
 // Serialize per-book page allocation so rapid successive scans get distinct
 // Page<N> numbers (page 2 and page 3, never page 2 twice).
@@ -420,6 +487,7 @@ async function reserveAndStash(book, base64, model, langs, explicitPage) {
         fs.rm(path.join(dir, f), { force: true }).catch(() => {}),
       ),
     );
+    await fs.rm(path.join(dir, "audio"), { recursive: true, force: true }).catch(() => {});
     await fs.writeFile(path.join(dir, "source.jpg"), Buffer.from(base64, "base64"));
     await writeStatus(book, page, {
       status: "queued",
@@ -501,9 +569,10 @@ async function recoverPending() {
 
 // ─── Claude Code runner ─────────────────────────────────────────────────────
 // Streams events (stream-json + partial messages) so we can report live
-// progress. `report(phase)` is called as the model moves through
-// reading → thinking → writing.
-function runClaude(prompt, model, cwd, report) {
+// progress. `report(phase, meta?)` is called as the model moves through
+// reading → thinking → writing; meta.chars carries the running output size for
+// the dashboard. `tag` (e.g. "[Otje p16]") attributes log lines to their job.
+function runClaude(prompt, model, cwd, report, tag = "") {
   return new Promise((resolve, reject) => {
     const alias = MODEL_ALIAS[model] || "sonnet";
     const args = [
@@ -537,7 +606,7 @@ function runClaude(prompt, model, cwd, report) {
 
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
-      log(`     claude timed out after ${CLAUDE_TIMEOUT_MS / 1000}s — killed`);
+      log(`${tag} claude timed out after ${CLAUDE_TIMEOUT_MS / 1000}s — killed`);
       reject(new Error("Claude Code timed out."));
     }, CLAUDE_TIMEOUT_MS);
 
@@ -564,9 +633,9 @@ function runClaude(prompt, model, cwd, report) {
             const txt = e.delta.text || "";
             assistantText += txt;
             chars += txt.length;
-            if (chars - lastCharReport >= 500) {
+            if (chars - lastCharReport >= 250) {
               lastCharReport = chars;
-              report(`Writing the lesson… (${chars} chars)`);
+              report("Writing the lesson…", { chars });
             }
           } else if (e.delta.type === "thinking_delta") {
             if (!firstThinkAt) firstThinkAt = Date.now();
@@ -618,9 +687,9 @@ function runClaude(prompt, model, cwd, report) {
       const generate = Math.max(0, end - firstOut); // emitting the JSON
       const pct = (x) => (total ? Math.round((x / total) * 100) : 0);
       const s = (x) => (x / 1000).toFixed(1);
-      log(`     claude finished in ${s(total)}s (exit ${code})`);
+      log(`${tag} claude finished in ${s(total)}s (exit ${code})`);
       log(
-        `     ⏱ startup ${s(startup)}s (${pct(startup)}%) · read+think ${s(analyze)}s (${pct(analyze)}%) · write ${s(generate)}s (${pct(generate)}%) · ${chars} chars out`,
+        `${tag} ⏱ startup ${s(startup)}s (${pct(startup)}%) · read+think ${s(analyze)}s (${pct(analyze)}%) · write ${s(generate)}s (${pct(generate)}%) · ${chars} chars out`,
       );
       if (code !== 0) {
         reject(new Error(stderr.trim() || `claude exited with code ${code}`));
@@ -682,18 +751,59 @@ async function stashTemp(base64) {
   return dir;
 }
 
+// Claude-side throttling surfaces as an error string. With unbounded parallel
+// launches that's an expected condition, not a failure — back off and retry the
+// stage instead of erroring the whole page.
+const RATE_LIMIT_RE = /rate.?limit|overloaded|429|too many (?:requests|concurrent)|usage limit|capacity/i;
+const BACKOFF_MS = [15_000, 30_000, 60_000];
+async function runClaudeWithBackoff(prompt, model, dir, report, tag) {
+  for (let i = 0; ; i++) {
+    try {
+      return await runClaude(prompt, model, dir, report, tag);
+    } catch (e) {
+      if (i >= BACKOFF_MS.length || !RATE_LIMIT_RE.test(String(e?.message))) throw e;
+      const sec = BACKOFF_MS[i] / 1000;
+      report(`Rate-limited — retrying in ${sec}s…`);
+      log(`${tag} rate-limited — backing off ${sec}s (retry ${i + 1}/${BACKOFF_MS.length})`);
+      await new Promise((r) => setTimeout(r, BACKOFF_MS[i]));
+    }
+  }
+}
+
+// Stage-2 fan-out: group the transcript's paragraphs into chunks of roughly
+// CHUNK_SENTENCES sentences (paragraphs stay intact) so one page's enrichment
+// runs as parallel claude calls instead of one long serial generation.
+const CHUNK_SENTENCES = Number(process.env.CHUNK_SENTENCES) || 10;
+function chunkTranscript(t) {
+  const chunks = [];
+  let cur = [];
+  let n = 0;
+  for (const p of t.paragraphs) {
+    const len = Array.isArray(p) ? p.length : 1;
+    if (cur.length && n + len > CHUNK_SENTENCES) {
+      chunks.push(cur);
+      cur = [];
+      n = 0;
+    }
+    cur.push(p);
+    n += len;
+  }
+  if (cur.length) chunks.push(cur);
+  return chunks;
+}
+
 // Run claude once, parse + validate the JSON, retry once with a stricter nudge.
-async function runClaudeJson(promptBase, model, dir, report, validate) {
+async function runClaudeJson(promptBase, model, dir, report, validate, tag = "") {
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt === 1) {
       report("Reply wasn't valid JSON — retrying…");
-      log("     reply wasn't valid JSON — retrying with a stricter nudge");
+      log(`${tag} reply wasn't valid JSON — retrying with a stricter nudge`);
     }
     const prompt =
       attempt === 0
         ? promptBase
         : promptBase + "\n\nIMPORTANT: Return ONLY raw minified JSON. No prose, no markdown.";
-    const reply = await runClaude(prompt, model, dir, report);
+    const reply = await runClaudeWithBackoff(prompt, model, dir, report, tag);
     try {
       return validate(parseModelJson(reply));
     } catch (e) {
@@ -701,6 +811,160 @@ async function runClaudeJson(promptBase, model, dir, report, validate) {
     }
   }
   throw new Error("No valid output produced.");
+}
+
+// ─── Narrator (stage 3, separate job) ────────────────────────────────────────
+// After a lesson is committed, a narrate job synthesizes one audio file per
+// sentence with Chatterbox Multilingual TTS (local, open-source) into
+// projects/<book>/Page<N>/audio/. Needs the one-time setup:
+//     sh bridge/setup-narrator.sh
+// Runs one page at a time (the model holds a few GB of memory); pages queue.
+// Drop a voice-ref.wav in bridge/ to clone that voice as the narrator.
+const NARRATOR_PY = path.join(BRIDGE_DIR, ".venv-narrator", "bin", "python");
+const NARRATE_SCRIPT = path.join(BRIDGE_DIR, "narrate.py");
+// Idle (not total) timeout: killed only if no sentence completes for this long.
+// Generous because the first run downloads the model weights.
+const NARRATE_IDLE_TIMEOUT_MS = Number(process.env.NARRATE_IDLE_TIMEOUT_MS) || 20 * 60_000;
+const NARRATE_CONCURRENCY = Number(process.env.NARRATE_CONCURRENCY) || 1;
+
+// Language names (as the app sends them) → Chatterbox ISO ids.
+const TTS_LANG = {
+  arabic: "ar", danish: "da", german: "de", greek: "el", english: "en",
+  spanish: "es", finnish: "fi", french: "fr", hebrew: "he", hindi: "hi",
+  italian: "it", japanese: "ja", korean: "ko", malay: "ms", dutch: "nl",
+  norwegian: "no", polish: "pl", portuguese: "pt", russian: "ru", swedish: "sv",
+  swahili: "sw", turkish: "tr", chinese: "zh",
+};
+
+let narratorAvailable = null; // lazily checked once
+async function checkNarrator() {
+  if (narratorAvailable === null) {
+    narratorAvailable = await fs.access(NARRATOR_PY).then(() => true, () => false);
+  }
+  return narratorAvailable;
+}
+
+// Merge a patch into a page's status.json without clobbering other fields.
+async function patchStatus(book, page, patch) {
+  const file = path.join(PROJECTS_DIR, safeBookName(book), `Page${page}`, "status.json");
+  let st = {};
+  try {
+    st = JSON.parse(await fs.readFile(file, "utf8"));
+  } catch {
+    /* start fresh */
+  }
+  await fs.writeFile(file, JSON.stringify({ ...st, ...patch }, null, 2) + "\n", "utf8").catch(() => {});
+}
+
+let narrateActive = 0;
+const narrateQueue = [];
+function queueNarration(book, page) {
+  (async () => {
+    if (!(await checkNarrator())) {
+      if (!queueNarration.hinted) {
+        queueNarration.hinted = true;
+        log(`♪ narrator not set up — run "sh bridge/setup-narrator.sh" to enable local audio`);
+      }
+      return;
+    }
+    // Skip duplicates already queued for the same page.
+    const dup = narrateQueue.some((q) => q.book === book && q.page === page);
+    if (dup) return;
+    narrateQueue.push({ book, page });
+    pumpNarrate();
+  })().catch(() => {});
+}
+function pumpNarrate() {
+  while (narrateActive < NARRATE_CONCURRENCY && narrateQueue.length) {
+    const item = narrateQueue.shift();
+    narrateActive++;
+    runNarration(item).finally(() => {
+      narrateActive--;
+      pumpNarrate();
+    });
+  }
+}
+
+async function runNarration({ book, page }) {
+  const tag = `[${safeBookName(book)} p${page}] ♪`;
+  const pageDir = path.join(PROJECTS_DIR, safeBookName(book), `Page${page}`);
+  const lessonFile = path.join(pageDir, "lesson.json");
+  if (!(await fs.access(lessonFile).then(() => true, () => false))) {
+    log(`${tag} no lesson.json — skipping narration`);
+    return;
+  }
+  // Pick the TTS language from the page's recorded source language.
+  let langName = "dutch";
+  try {
+    const st = JSON.parse(await fs.readFile(path.join(pageDir, "status.json"), "utf8"));
+    if (st.sourceLanguage) langName = String(st.sourceLanguage).toLowerCase();
+  } catch {
+    /* default */
+  }
+  const lang = TTS_LANG[langName] || "nl";
+
+  const { job } = createJob({ book, page });
+  job.status = "running";
+  job.stage = "narrate";
+  const t0 = Date.now();
+  await patchStatus(book, page, { audio: "generating" });
+  log(`${tag} narrating (lang=${lang})…`);
+
+  try {
+    await new Promise((resolve, reject) => {
+      const child = spawn(NARRATOR_PY, [NARRATE_SCRIPT, "--lesson", lessonFile, "--out", path.join(pageDir, "audio"), "--lang", lang]);
+      let stderr = "";
+      let buf = "";
+      let timer;
+      const armTimer = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+          child.kill("SIGKILL");
+          reject(new Error(`narrator made no progress for ${NARRATE_IDLE_TIMEOUT_MS / 60000} min`));
+        }, NARRATE_IDLE_TIMEOUT_MS);
+      };
+      armTimer();
+      child.stdout.on("data", (d) => {
+        buf += d;
+        let nl;
+        while ((nl = buf.indexOf("\n")) !== -1) {
+          const line = buf.slice(0, nl).trim();
+          buf = buf.slice(nl + 1);
+          if (!line) continue;
+          armTimer();
+          try {
+            const evt = JSON.parse(line);
+            if (evt.loading) log(`${tag} loading TTS model… (first run downloads the weights)`);
+            if (evt.total != null) job.chunkTotal = evt.total;
+            if (evt.done != null) job.chunkDone = evt.done;
+          } catch {
+            /* ignore non-JSON lines */
+          }
+        }
+      });
+      child.stderr.on("data", (d) => (stderr += d));
+      child.on("error", (err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        if (code === 0) resolve();
+        else reject(new Error(stderr.trim().split("\n").pop() || `narrator exited with code ${code}`));
+      });
+    });
+    await patchStatus(book, page, { audio: "done" });
+    job.status = "done";
+    job.phase = "Done";
+    job.finishedAt = Date.now();
+    log(`✓ ${tag} ${job.chunkTotal || 0} sentences narrated in ${Math.round((Date.now() - t0) / 1000)}s`);
+  } catch (e) {
+    await patchStatus(book, page, { audio: "error", audioError: e.message });
+    job.status = "error";
+    job.error = e.message;
+    job.finishedAt = Date.now();
+    log(`✗ ${tag} narration failed: ${e.message}`);
+  }
 }
 
 // Read a previously-committed transcript (used to resume at stage 2).
@@ -717,16 +981,29 @@ async function processJob({ id, image, model, langs }) {
   const job = jobs.get(id);
   if (!job) return;
   const short = id.slice(0, 8);
+  const tag = `[${safeBookName(job.book)} p${job.page}]`;
   let lastLogged = "";
-  const report = (phase) => {
-    job.phase = phase; // always update the phone-facing phase
-    // Terminal: skip the per-char "Writing…" ticks, and only log a phase when it
-    // actually changes — otherwise "Thinking…" floods the log with identical lines.
-    if (phase.startsWith("Writing the lesson… (")) return;
-    if (phase === lastLogged) return;
+  // Reporter factory. Stage 1 passes chunkChars=null; stage-2 chunks share one
+  // chunkChars array so the phone-facing phase and the dashboard both show the
+  // aggregate char count across all parallel chunks. Char ticks update state
+  // only — the 1s dashboard repaint shows them without flooding the log.
+  const makeReport = (chunkChars, chunkIdx) => (phase, meta = {}) => {
+    if (meta.chars != null) {
+      if (chunkChars) {
+        chunkChars[chunkIdx] = meta.chars;
+        job.chars = chunkChars.reduce((a, b) => a + (b || 0), 0);
+      } else {
+        job.chars = meta.chars;
+      }
+      job.phase = `Writing the lesson… (${job.chars} chars)`;
+      return;
+    }
+    job.phase = phase;
+    if (phase === lastLogged) return; // identical phases (e.g. "Thinking…") log once
     lastLogged = phase;
-    log(`     ${phase}`);
+    log(`${tag} ${phase}`);
   };
+  const report = makeReport(null, 0);
   // Stamp durable status, carrying enough to resume after a restart.
   let detectedPage = null; // printed page number the model read off the page
   const stamp = (extra) =>
@@ -747,9 +1024,10 @@ async function processJob({ id, image, model, langs }) {
     let transcript = await readTranscript(pageDir); // present → resume at stage 2
     if (transcript) {
       report("Resuming from saved transcript…");
-      log(`     ↻ page ${job.page}: transcript already saved — resuming at stage 2`);
+      log(`${tag} ↻ transcript already saved — resuming at stage 2`);
     } else {
       if (!image) throw new Error("No image available to transcribe.");
+      job.stage = "transcribe";
       await stamp({ status: "processing", stage: "transcribing", startedAt: Date.now() });
       report("Reading the page…");
       const tmp = await stashTemp(image);
@@ -760,6 +1038,7 @@ async function processJob({ id, image, model, langs }) {
           tmp,
           report,
           validateTranscript,
+          tag,
         );
       } finally {
         fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
@@ -768,26 +1047,48 @@ async function processJob({ id, image, model, langs }) {
       await fs.writeFile(path.join(pageDir, "transcript.json"), JSON.stringify(transcript) + "\n", "utf8");
       await fs.writeFile(path.join(pageDir, "native.txt"), transcriptText(transcript), "utf8");
       await stamp({ status: "processing", stage: "transcribed", sentences: countSentences(transcript) });
-      log(`     ✓ stage 1: ${countSentences(transcript)} sentences — native.txt saved (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
+      log(`${tag} ✓ stage 1: ${countSentences(transcript)} sentences — native.txt saved (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
     }
 
-    // ── Stage 2: enrich → commit lesson.json + page.html ──────────────────────
+    // ── Stage 2: enrich in parallel chunks → commit lesson.json + page.html ───
     detectedPage = transcript.pageNumber ?? null; // surface what was printed on the page
+    job.stage = "enrich";
+    job.chars = 0;
     await stamp({ status: "processing", stage: "enriching" });
     report("Writing the lesson…");
-    const tmp2 = await stashTemp(null); // text-only, no image needed
-    let lesson;
-    try {
-      lesson = await runClaudeJson(
-        enrichPrompt(langs?.sourceLanguage, langs?.targetLanguage, transcript),
-        model,
-        tmp2,
-        report,
-        validateLesson,
-      );
-    } finally {
-      fs.rm(tmp2, { recursive: true, force: true }).catch(() => {});
-    }
+    const chunks = chunkTranscript(transcript);
+    job.chunkTotal = chunks.length;
+    const chunkChars = new Array(chunks.length).fill(0);
+    if (chunks.length > 1) log(`${tag} stage 2: fanning out into ${chunks.length} parallel chunks`);
+    const parts = await Promise.all(
+      chunks.map(async (paragraphs, i) => {
+        const tmp2 = await stashTemp(null); // text-only, no image needed
+        try {
+          const part = await runClaudeJson(
+            enrichPrompt(
+              langs?.sourceLanguage,
+              langs?.targetLanguage,
+              { pageTitle: i === 0 ? transcript.pageTitle ?? null : null, paragraphs },
+              chunks.length > 1,
+            ),
+            model,
+            tmp2,
+            makeReport(chunkChars, i),
+            validateLesson,
+            tag,
+          );
+          job.chunkDone++;
+          if (chunks.length > 1) log(`${tag} ✓ chunk ${i + 1}/${chunks.length} done`);
+          return part;
+        } finally {
+          fs.rm(tmp2, { recursive: true, force: true }).catch(() => {});
+        }
+      }),
+    );
+    const lesson = {
+      pageTitle: parts[0]?.pageTitle ?? null,
+      paragraphs: parts.flatMap((p) => p.paragraphs),
+    };
     if (lesson.pageTitle == null && transcript.pageTitle != null) lesson.pageTitle = transcript.pageTitle;
 
     await fs.writeFile(path.join(pageDir, "lesson.json"), JSON.stringify(lesson, null, 2) + "\n", "utf8");
@@ -802,14 +1103,15 @@ async function processJob({ id, image, model, langs }) {
     job.phase = "Done";
     job.status = "done";
     job.finishedAt = Date.now();
-    log(`✓ job ${short} done: ${n} sentences in ${Math.round((Date.now() - t0) / 1000)}s`);
+    log(`✓ ${tag} job ${short} done: ${n} sentences in ${Math.round((Date.now() - t0) / 1000)}s`);
+    queueNarration(job.book, job.page); // stage 3: local audio, as its own job
   } catch (e) {
     job.error = e.message || "Failed to produce lesson.";
     job.phase = "Error";
     job.status = "error";
     job.finishedAt = Date.now();
     await stamp({ status: "error", error: job.error, finishedAt: Date.now() });
-    log(`✗ job ${short} error: ${job.error}`);
+    log(`✗ ${tag} job ${short} error: ${job.error}`);
   }
 }
 
@@ -838,6 +1140,61 @@ const server = http.createServer((req, res) => {
     const job = jobs.get(id);
     if (!job) return send(res, 404, { error: "Unknown or expired job." });
     return send(res, 200, jobView(job));
+  }
+
+  // Audio manifest for a page (404 until narration has finished).
+  if (req.method === "GET" && req.url.match(/^\/books\/.+\/pages\/\d+\/audio$/)) {
+    const mm = decodeURIComponent(req.url).match(/^\/books\/(.+)\/pages\/(\d+)\/audio$/);
+    const file = path.join(PROJECTS_DIR, safeBookName(mm[1]), `Page${Number(mm[2])}`, "audio", "manifest.json");
+    (async () => {
+      try {
+        send(res, 200, JSON.parse(await fs.readFile(file, "utf8")));
+      } catch {
+        send(res, 404, { error: "No audio for that page yet." });
+      }
+    })().catch((e) => send(res, 500, { error: e.message }));
+    return;
+  }
+
+  // One sentence's audio file, e.g. /books/Otje/pages/16/audio/pg2_s1.mp3
+  if (req.method === "GET" && req.url.match(/^\/books\/.+\/pages\/\d+\/audio\/[A-Za-z0-9._-]+$/)) {
+    const mm = decodeURIComponent(req.url).match(/^\/books\/(.+)\/pages\/(\d+)\/audio\/([A-Za-z0-9._-]+)$/);
+    const name = path.basename(mm[3]); // already character-restricted by the route match
+    const file = path.join(PROJECTS_DIR, safeBookName(mm[1]), `Page${Number(mm[2])}`, "audio", name);
+    (async () => {
+      try {
+        const buf = await fs.readFile(file);
+        res.writeHead(200, {
+          "content-type": name.endsWith(".wav") ? "audio/wav" : "audio/mpeg",
+          "content-length": buf.length,
+          "access-control-allow-origin": "*",
+          "cache-control": "max-age=86400",
+        });
+        res.end(buf);
+      } catch {
+        send(res, 404, { error: "No such audio file." });
+      }
+    })().catch((e) => send(res, 500, { error: e.message }));
+    return;
+  }
+
+  // Generate (or resume) narration for an existing page — backfill for pages
+  // scanned before the narrator existed. No-op queue if audio is complete:
+  // the worker skips files that already exist.
+  if (req.method === "POST" && req.url.match(/^\/books\/.+\/pages\/\d+\/narrate$/)) {
+    const mm = decodeURIComponent(req.url).match(/^\/books\/(.+)\/pages\/(\d+)\/narrate$/);
+    (async () => {
+      if (!(await checkNarrator())) {
+        return send(res, 503, { error: 'Narrator not set up. Run "sh bridge/setup-narrator.sh" on the laptop.' });
+      }
+      const lesson = path.join(PROJECTS_DIR, safeBookName(mm[1]), `Page${Number(mm[2])}`, "lesson.json");
+      if (!(await fs.access(lesson).then(() => true, () => false))) {
+        return send(res, 404, { error: "That page has no lesson yet." });
+      }
+      queueNarration(mm[1], Number(mm[2]));
+      send(res, 202, { ok: true });
+    })().catch((e) => send(res, 500, { error: e.message }));
+    return;
   }
 
   // Serve a page's source image so the reader can show the artwork.
@@ -1010,7 +1367,7 @@ const server = http.createServer((req, res) => {
             `book="${safeBookName(book)}" page=${pageNum} → job ${id.slice(0, 8)} ` +
             `(in flight: ${active + queue.length + 1})`,
         );
-        enqueueJob({ id, image, model, langs }); // bounded worker pool picks it up
+        enqueueJob({ id, image, model, langs }); // launches immediately (no cap unless MAX_CONCURRENCY set)
         return send(res, 202, { jobId: id, page: pageNum });
       } catch (e) {
         log(`✗ bad /lesson request: ${e.message}`);

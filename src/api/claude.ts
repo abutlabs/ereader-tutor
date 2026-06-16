@@ -329,6 +329,7 @@ export interface BridgePageInfo {
   sentences: number;
   pageTitle: string | null;
   detectedPage: number | null; // page number the model read off the printed page
+  audio?: boolean; // true once the bridge's narrator has finished this page
 }
 
 // Re-label a page on the bridge: rename its Page<old> folder to Page<new>.
@@ -398,6 +399,33 @@ export async function fetchBridgePageLesson(
     throw new ClaudeError("Bridge returned an unexpected page.");
   }
   return lesson as LessonResult;
+}
+
+// Fetch a page's narrated-audio manifest: "pg<para>_s<sent>" -> file name.
+// Returns null while the bridge hasn't narrated the page yet (404).
+export async function fetchBridgeAudioManifest(
+  bridgeUrl: string,
+  book: string,
+  page: number,
+): Promise<Record<string, string> | null> {
+  const res = await fetch(
+    `${bridgeUrl}/books/${encodeURIComponent(book)}/pages/${page}/audio`,
+  );
+  if (res.status === 404) return null;
+  if (!res.ok) throw new ClaudeError(`Bridge error ${res.status}`, res.status);
+  const json = await res.json();
+  return json?.files && typeof json.files === "object"
+    ? (json.files as Record<string, string>)
+    : null;
+}
+
+export function bridgeAudioFileUrl(
+  bridgeUrl: string,
+  book: string,
+  page: number,
+  file: string,
+): string {
+  return `${bridgeUrl}/books/${encodeURIComponent(book)}/pages/${page}/audio/${file}`;
 }
 
 // Convert a LessonResult into the reader's Page shape (minus page number, which

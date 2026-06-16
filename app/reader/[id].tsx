@@ -101,7 +101,10 @@ export default function ReaderScreen() {
   const doneCount = allSentences.filter((s) => learned.has(s.id)).length;
 
   function onSpeak(text: string, localId: string) {
-    speak(text, localId, { language: lang, slow });
+    // The sentence button prefers the bridge-narrated recording once synced;
+    // word taps stay on the native voice (only sentences are narrated).
+    const audioUrl = localId === "sentence" ? active?.audioUrl : undefined;
+    speak(text, localId, { language: lang, slow, audioUrl });
   }
 
   async function toggleLearned() {

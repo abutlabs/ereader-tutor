@@ -12,14 +12,19 @@ import { languageName, DEFAULT_TARGET_LANGUAGE } from "../data/languages";
 import {
   appendPage,
   ensureImagesDir,
+  ensurePageAudioDir,
   getBook,
+  pageAudioDir,
   pageImagePath,
   renumberPage,
+  setPageAudio,
   setPageImage,
   upsertPage,
 } from "../storage/books";
 import { moveLearned } from "../storage/progress";
 import {
+  bridgeAudioFileUrl,
+  fetchBridgeAudioManifest,
   fetchBridgePageLesson,
   imageToLesson,
   lessonToParagraphs,
@@ -223,6 +228,39 @@ async function downloadPageImage(
   }
 }
 
+// Download a page's narrated sentence audio from the bridge for offline
+// playback. Returns "pg<para>_s<sent>" -> local file uri, or null if the page
+// has no audio yet. Already-downloaded files are kept (cheap re-sync). Optional
+// like artwork — never blocks sync.
+async function downloadPageAudio(
+  bridgeUrl: string,
+  book: string,
+  page: number,
+  bookId: string,
+): Promise<Map<string, string> | null> {
+  try {
+    const files = await fetchBridgeAudioManifest(bridgeUrl, book, page);
+    if (!files) return null;
+    await ensurePageAudioDir(bookId, page);
+    const uris = new Map<string, string>();
+    for (const [key, file] of Object.entries(files)) {
+      const dest = `${pageAudioDir(bookId, page)}${file}`;
+      const info = await FileSystem.getInfoAsync(dest);
+      if (!info.exists || !info.size) {
+        const res = await FileSystem.downloadAsync(
+          bridgeAudioFileUrl(bridgeUrl, book, page, file),
+          dest,
+        );
+        if (res.status !== 200) continue;
+      }
+      uris.set(key, dest);
+    }
+    return uris.size ? uris : null;
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Pull pages the bridge has already produced for this book and import any the
  * app is missing. Lets you recover work the phone never received (e.g. the scan
@@ -253,19 +291,43 @@ export async function syncFromBridge(
       onPhase(`Importing page ${r.page}…`);
       const lesson = await fetchBridgePageLesson(bridgeUrl, title, r.page);
       const imageUri = await downloadPageImage(bridgeUrl, title, r.page, bookId);
+      const paragraphs = lessonToParagraphs(lesson);
+      if (r.audio) {
+        onPhase(`Downloading audio for page ${r.page}…`);
+        const audio = await downloadPageAudio(bridgeUrl, title, r.page, bookId);
+        if (audio) {
+          paragraphs.forEach((para, pi) =>
+            para.forEach((s, si) => {
+              const uri = audio.get(`pg${pi}_s${si}`);
+              if (uri) s.audioUrl = uri;
+            }),
+          );
+        }
+      }
       updated = await upsertPage(bookId, r.page, {
         title: lesson.pageTitle ?? undefined,
         detectedPage: r.detectedPage,
         imageUri,
-        paragraphs: lessonToParagraphs(lesson),
+        paragraphs,
       });
       imported++;
-    } else if (!local.imageUri) {
-      // Backfill artwork for a page imported before image-sync existed.
-      const imageUri = await downloadPageImage(bridgeUrl, title, r.page, bookId);
-      if (imageUri) {
-        await setPageImage(bookId, r.page, imageUri);
-        updated = await getBook(bookId);
+    } else {
+      if (!local.imageUri) {
+        // Backfill artwork for a page imported before image-sync existed.
+        const imageUri = await downloadPageImage(bridgeUrl, title, r.page, bookId);
+        if (imageUri) {
+          await setPageImage(bookId, r.page, imageUri);
+          updated = await getBook(bookId);
+        }
+      }
+      // Backfill narration for a page imported before its audio was ready.
+      if (r.audio && local.paragraphs.some((para) => para.some((s) => !s.audioUrl))) {
+        onPhase(`Downloading audio for page ${r.page}…`);
+        const audio = await downloadPageAudio(bridgeUrl, title, r.page, bookId);
+        if (audio) {
+          await setPageAudio(bookId, r.page, audio);
+          updated = await getBook(bookId);
+        }
       }
     }
   }

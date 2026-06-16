@@ -20,7 +20,7 @@ import { colors } from "../src/theme/theme";
 SplashScreen.preventAutoHideAsync();
 
 export default function RootLayout() {
-  const [loaded] = useFonts({
+  const [loaded, fontError] = useFonts({
     Spectral_400Regular,
     Spectral_500Medium,
     Spectral_400Regular_Italic,
@@ -32,10 +32,11 @@ export default function RootLayout() {
   });
 
   useEffect(() => {
-    if (loaded) SplashScreen.hideAsync();
-  }, [loaded]);
+    if (fontError) console.warn("Font loading failed:", fontError);
+    if (loaded || fontError) SplashScreen.hideAsync();
+  }, [loaded, fontError]);
 
-  if (!loaded) return null;
+  if (!loaded && !fontError) return null;
 
   return (
     <SafeAreaProvider>
