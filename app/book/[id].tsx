@@ -26,6 +26,7 @@ import {
 import ScanOverlay, { ScanPhase } from "../../src/components/ScanOverlay";
 import NumberPrompt from "../../src/components/NumberPrompt";
 import { loadWordlist } from "../../src/storage/wordlist";
+import { useDevMode } from "../../src/storage/devMode";
 import { colors, fonts, radius, spacing } from "../../src/theme/theme";
 
 interface Pending {
@@ -37,6 +38,7 @@ interface Pending {
 export default function BookScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const dev = useDevMode();
   const [book, setBook] = useState<Book | null>(null);
   const [scan, setScan] = useState<ScanPhase | null>(null);
   const [pagePrompt, setPagePrompt] = useState<Pending | null>(null);
@@ -215,33 +217,39 @@ export default function BookScreen() {
       <Header
         title=""
         onBack={() => router.back()}
-        onEdit={() => router.push(`/edit/${book.id}`)}
-        onExport={() => router.push(`/export/${book.id}`)}
+        onEdit={dev ? () => router.push(`/edit/${book.id}`) : undefined}
+        onExport={dev ? () => router.push(`/export/${book.id}`) : undefined}
       />
       <ScrollView contentContainerStyle={{ padding: spacing(5) }}>
         <Text style={styles.kicker}>{book.meta.author}</Text>
         <Text style={styles.title}>{book.meta.title}</Text>
 
-        <View style={styles.statusRow}>
-          <Feather
-            name={isComplete ? "check-circle" : "edit-3"}
-            size={14}
-            color={isComplete ? colors.good : colors.inkSoft}
-          />
-          <Text style={[styles.statusText, isComplete && { color: colors.good }]}>
-            {isComplete ? "Complete" : "Open · adding pages"}
-          </Text>
-        </View>
+        {dev && (
+          <View style={styles.statusRow}>
+            <Feather
+              name={isComplete ? "check-circle" : "edit-3"}
+              size={14}
+              color={isComplete ? colors.good : colors.inkSoft}
+            />
+            <Text style={[styles.statusText, isComplete && { color: colors.good }]}>
+              {isComplete ? "Complete" : "Open · adding pages"}
+            </Text>
+          </View>
+        )}
 
-        <Pressable style={styles.scanBtn} onPress={onScanPress}>
-          <Feather name="camera" size={18} color={colors.paper} />
-          <Text style={styles.scanText}>Scan a page</Text>
-        </Pressable>
+        {dev && (
+          <>
+            <Pressable style={styles.scanBtn} onPress={onScanPress}>
+              <Feather name="camera" size={18} color={colors.paper} />
+              <Text style={styles.scanText}>Scan a page</Text>
+            </Pressable>
 
-        <Pressable style={styles.syncBtn} onPress={onSyncPress}>
-          <Feather name="refresh-cw" size={16} color={colors.accent} />
-          <Text style={styles.syncText}>Sync from bridge</Text>
-        </Pressable>
+            <Pressable style={styles.syncBtn} onPress={onSyncPress}>
+              <Feather name="refresh-cw" size={16} color={colors.accent} />
+              <Text style={styles.syncText}>Sync from bridge</Text>
+            </Pressable>
+          </>
+        )}
 
         <Pressable style={styles.wordlistBtn} onPress={() => router.push(`/wordlist/${book.id}`)}>
           <Feather name="bookmark" size={16} color={colors.accent} />

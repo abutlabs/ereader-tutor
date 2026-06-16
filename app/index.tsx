@@ -16,6 +16,11 @@ import { useFocusEffect, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { BookSummary } from "../src/data/schema";
 import { createBook, deleteBook, getBook, listBooks } from "../src/storage/books";
+import { CATALOG, CATALOG_IDS, type CatalogItem } from "../src/data/catalog";
+import { getOwnedIds } from "../src/storage/entitlements";
+import { billing } from "../src/billing";
+import { STORE_ENABLED } from "../src/config";
+import { useDevMode } from "../src/storage/devMode";
 import {
   loadDaily,
   loadLastPageIdx,
@@ -64,7 +69,10 @@ async function bookProgress(id: string): Promise<{ learned: number; total: numbe
 
 export default function LibraryScreen() {
   const router = useRouter();
+  const dev = useDevMode();
   const [cards, setCards] = useState<BookCard[]>([]);
+  const [store, setStore] = useState<CatalogItem[]>([]);
+  const [buying, setBuying] = useState<string | null>(null);
   const [cont, setCont] = useState<Continue | null>(null);
   const [daily, setDaily] = useState<DailyState | null>(null);
   const [creating, setCreating] = useState(false);
@@ -74,11 +82,18 @@ export default function LibraryScreen() {
   const refresh = useCallback(() => {
     (async () => {
       setDaily(await loadDaily());
-      const summaries = await listBooks();
+      const all = await listBooks();
+      // Launch: store off → show every book (free + your own imports/creations).
+      // Store on → library shows only owned books; the rest go to the Bookstore.
+      const owned = STORE_ENABLED ? await getOwnedIds() : null;
+      const summaries = owned ? all.filter((s) => owned.has(s.id)) : all;
       const next = await Promise.all(
         summaries.map(async (s) => ({ summary: s, ...(await bookProgress(s.id)) })),
       );
       setCards(next);
+
+      // Bookstore = paid books not yet owned (empty while the store is off).
+      setStore(owned ? CATALOG.filter((c) => c.access === "paid" && !owned.has(c.id)) : []);
 
       const top = summaries[0];
       if (top) {
@@ -117,11 +132,36 @@ export default function LibraryScreen() {
   }
 
   function onLongPress(b: BookSummary) {
-    if (b.id === "dik-trom") return;
+    if (CATALOG_IDS.has(b.id)) return; // bundled books can't be deleted
     Alert.alert("Delete project?", `"${b.title}" and its scans.`, [
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: async () => { await deleteBook(b.id); refresh(); } },
     ]);
+  }
+
+  function onBuy(item: CatalogItem) {
+    const price = item.price ?? "";
+    Alert.alert(
+      item.meta.title,
+      `${item.blurb ? item.blurb + "\n\n" : ""}Unlock this book${price ? ` for ${price}` : ""}?`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: price ? `Buy ${price}` : "Unlock",
+          onPress: async () => {
+            setBuying(item.id);
+            const res = await billing.purchase(item);
+            setBuying(null);
+            if (res.ok) {
+              refresh();
+              Alert.alert("Added to your library", `"${item.meta.title}" is ready to read.`);
+            } else if (!res.cancelled) {
+              Alert.alert("Purchase failed", res.error ?? "Please try again.");
+            }
+          },
+        },
+      ],
+    );
   }
 
   const goal = daily?.goal ?? 20;
@@ -210,8 +250,42 @@ export default function LibraryScreen() {
           );
         })}
 
-        {/* Add cluster */}
-        {creating ? (
+        {/* Bookstore — paid books to unlock */}
+        {store.length > 0 && (
+          <>
+            <Text style={styles.sectionLabel}>Bookstore</Text>
+            {store.map((item) => (
+              <Pressable
+                key={item.id}
+                style={styles.storeRow}
+                onPress={() => onBuy(item)}
+                disabled={buying === item.id}
+              >
+                <View style={styles.lockWrap}>
+                  <Cover title={item.meta.title} seed={item.id} w={50} h={70} radius={6} fontSize={12} />
+                  <View style={styles.lockBadge}>
+                    <Feather name="lock" size={11} color="#fff" />
+                  </View>
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.rowTitle} numberOfLines={1}>{item.meta.title}</Text>
+                  <Text style={styles.rowAuthor} numberOfLines={1}>{item.meta.author}</Text>
+                  {!!item.blurb && (
+                    <Text style={styles.blurb} numberOfLines={2}>{item.blurb}</Text>
+                  )}
+                </View>
+                <View style={styles.priceTag}>
+                  <Text style={styles.priceText}>
+                    {buying === item.id ? "…" : item.price ?? "Unlock"}
+                  </Text>
+                </View>
+              </Pressable>
+            ))}
+          </>
+        )}
+
+        {/* Add cluster — content creation/import is developer-only */}
+        {dev && (creating ? (
           <View style={styles.createBox}>
             <TextInput
               placeholder="Book title (e.g. Otje)"
@@ -252,7 +326,7 @@ export default function LibraryScreen() {
               <Text style={styles.textBtnLabel}>Read an EPUB or library loan</Text>
             </Pressable>
           </>
-        )}
+        ))}
       </ScrollView>
     </SafeAreaView>
   );
@@ -332,6 +406,38 @@ const styles = StyleSheet.create({
   rowTitle: { fontFamily: fonts.display, fontSize: 18, color: colors.ink },
   rowAuthor: { fontFamily: fonts.body, fontSize: 13, color: colors.inkSoft, marginTop: spacing(0.5) },
   rowPct: { fontFamily: fonts.ui, fontSize: 12, color: colors.inkFaint, minWidth: 34, textAlign: "right" },
+
+  storeRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing(3.5),
+    backgroundColor: colors.cardDeep,
+    borderRadius: radius.md,
+    padding: spacing(3.5),
+    marginBottom: spacing(3),
+  },
+  lockWrap: { position: "relative" },
+  lockBadge: {
+    position: "absolute",
+    right: -5,
+    bottom: -5,
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    backgroundColor: colors.accent,
+    alignItems: "center",
+    justifyContent: "center",
+    borderWidth: 2,
+    borderColor: colors.cardDeep,
+  },
+  blurb: { fontFamily: fonts.body, fontSize: 12.5, lineHeight: 17, color: colors.inkFaint, marginTop: spacing(1) },
+  priceTag: {
+    backgroundColor: colors.accent,
+    paddingVertical: spacing(2),
+    paddingHorizontal: spacing(3.5),
+    borderRadius: radius.pill,
+  },
+  priceText: { fontFamily: fonts.uiSemibold, fontSize: 14, color: "#fff" },
 
   newBtn: {
     flexDirection: "row",
