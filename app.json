@@ -7,11 +7,6 @@
     "icon": "./assets/icon.png",
     "scheme": "ereadertutor",
     "userInterfaceStyle": "light",
-    "splash": {
-      "image": "./assets/splash.png",
-      "resizeMode": "contain",
-      "backgroundColor": "#f4f1ea"
-    },
     "assetBundlePatterns": [
       "**/*"
     ],
@@ -59,7 +54,10 @@
           "cameraPermission": "Scan book pages to turn them into Dutch lessons."
         }
       ],
-      "expo-audio"
+      "expo-audio",
+      "expo-font",
+      "expo-sharing",
+      "expo-status-bar"
     ],
     "experiments": {
       "typedRoutes": false
