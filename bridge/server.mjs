@@ -66,12 +66,89 @@ Output ONLY a single minified JSON object, no markdown, no commentary, of exactl
 {"pageTitle": string|null, "pageNumber": number|null, "paragraphs": [ ["first sentence.", "second sentence."], ["a sentence in the next paragraph."] ]}`;
 }
 
+// Stage 1b — for PDF-ingested pages whose text is in another language than the
+// book the learner will read: translate the original transcript (original.json,
+// written by bridge/ingest-pdf.py --translate-to) into the source language,
+// sentence for sentence. The result is committed as transcript.json, so from
+// here on the page is indistinguishable from a scanned one.
+function translatePrompt(fromLanguage, toLanguage, original) {
+  return `Translate the following ${fromLanguage} book passage into natural, modern ${toLanguage}, as a professional literary translator would — but keep sentences reasonably clear for an A2 learner of ${toLanguage} (no needless subordinate clauses; idiomatic, not word-for-word).
+
+Rules:
+- Translate sentence for sentence: EXACTLY one ${toLanguage} sentence per input sentence, same order, same paragraph structure (same number of paragraphs, same number of sentences in each). Never merge or split sentences.
+- Proper nouns: use the established ${toLanguage} nomenclature of the published translations of the work when one exists (for Tolkien in French, prefer the recent official Daniel Lauzon translations: Terre du Milieu, Terres Immortelles, Comté, Fendeval, etc.); otherwise keep the name as in the original. Be consistent.
+- Translate pageTitle too (or null if null). Copy pageNumber unchanged.
+
+Work efficiently: produce the JSON promptly without lengthy deliberation.
+
+Original:
+${JSON.stringify(original)}
+
+Output ONLY a single minified JSON object, no markdown, no commentary, of exactly this shape:
+{"pageTitle": string|null, "pageNumber": number|null, "paragraphs": [ ["sentence", "sentence"], ["sentence"] ]}`;
+}
+
+function shapeOf(paragraphs) {
+  return paragraphs.map((p) => (Array.isArray(p) ? p.length : Array.isArray(p?.sentences) ? p.sentences.length : 1));
+}
+// Validator: a transcript that keeps the original's paragraph/sentence counts.
+function validateTranslationOf(original) {
+  const want = shapeOf(original.paragraphs);
+  return (t) => {
+    validateTranscript(t);
+    const got = shapeOf(t.paragraphs);
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+      throw new Error(
+        `the translation must keep exactly one sentence per sentence — expected ${want.length} paragraph(s) with ${want.join(", ")} sentence(s), got ${got.length} with ${got.join(", ")}`,
+      );
+    }
+    return t;
+  };
+}
+// Validator: a lesson with one entry per transcript sentence, same grouping.
+function validateLessonOf(paragraphs) {
+  const want = shapeOf(paragraphs);
+  return (l) => {
+    validateLesson(l);
+    const got = shapeOf(l.paragraphs);
+    if (JSON.stringify(got) !== JSON.stringify(want)) {
+      throw new Error(
+        `produce exactly one study entry per transcript sentence, in the same paragraphs — expected ${want.length} paragraph(s) with ${want.join(", ")} sentence(s), got ${got.length} with ${got.join(", ")}`,
+      );
+    }
+    return l;
+  };
+}
+
+// Do two transcripts line up sentence for sentence? (needed to pass the
+// original text through as the lesson's translation)
+function sameShape(a, b) {
+  if (!a?.paragraphs || !b?.paragraphs || a.paragraphs.length !== b.paragraphs.length) return false;
+  return a.paragraphs.every((p, i) => Array.isArray(p) && Array.isArray(b.paragraphs[i]) && p.length === b.paragraphs[i].length);
+}
+async function readOriginal(pageDir) {
+  try {
+    return validateTranscript(JSON.parse(await fs.readFile(path.join(pageDir, "original.json"), "utf8")));
+  } catch {
+    return null;
+  }
+}
+
 // Stage 2 — enrich the transcript into the full lesson (text-only, no image).
 // The JSON keys stay "dutch"/"english"/"nl"/"en" regardless of the languages.
 // When the page is fanned out into chunks, each chunk gets only its own
 // paragraphs (partOfPage=true) and the merge step reassembles them in order.
-function enrichPrompt(sourceLanguage = "Dutch", targetLanguage = "English", transcript = {}, partOfPage = false) {
+function enrichPrompt(sourceLanguage = "Dutch", targetLanguage = "English", transcript = {}, partOfPage = false, reference = null) {
   const scope = partOfPage ? "part of one book page" : "one book page";
+  const counts = (transcript.paragraphs || []).map((p) => (Array.isArray(p) ? p.length : 1));
+  const refBlock = reference
+    ? `
+
+This ${sourceLanguage} text is a translation of a ${targetLanguage} original. The original is given below, sentence for sentence in the same order. For "english", use the ORIGINAL ${targetLanguage} sentence VERBATIM (do not re-translate); the word breakdown and notes must still explain the ${sourceLanguage} sentence. Produce EXACTLY one study entry per transcript sentence and keep the transcript's paragraph grouping: ${counts.length} paragraph(s) with ${counts.join(", ")} sentence(s). Never split or merge sentences, even long ones.
+
+Original ${targetLanguage} (same paragraph/sentence structure):
+${JSON.stringify(reference)}`
+    : "";
   return `You are an expert ${sourceLanguage}-language tutor for an A2 learner whose own language is ${targetLanguage}. Write every translation, explanation, and note in ${targetLanguage}.
 
 Below is the transcribed ${sourceLanguage} text of ${scope} (paragraphs of sentences). For EACH sentence, produce a study entry — keep the same sentences in the same order.
@@ -83,7 +160,7 @@ Work efficiently: produce the JSON promptly without lengthy deliberation. For ea
 - notes: 1-4 short A2 grammar/usage notes in ${targetLanguage}. If you modernized an archaic phrasing, add one note titled "Original" with the source wording.
 
 Transcript (keep its pageTitle):
-${JSON.stringify(transcript)}
+${JSON.stringify(transcript)}${refBlock}
 
 Output ONLY a single minified JSON object, no markdown, no commentary. Put ${sourceLanguage} text under "dutch"/"nl" and ${targetLanguage} text under "english"/"en". The exact shape is:
 {"pageTitle": string|null, "paragraphs": [ { "sentences": [ { "dutch": string, "english": string, "words": [ {"nl": string, "en": string} ], "notes": [ {"title": string, "body": string} ] } ] } ] }`;
@@ -157,11 +234,21 @@ async function listBookPages(book) {
     let sentences = 0;
     let pageTitle = null;
     let detectedPage = null;
+    let sourceLanguage = null;
+    let machineTranslated = false;
+    let chapter = null;
+    let chapterTitle = null;
+    let figures = 0;
     try {
       const s = JSON.parse(await fs.readFile(path.join(pdir, "status.json"), "utf8"));
+      chapter = typeof s.chapter === "number" ? s.chapter : null;
+      chapterTitle = s.chapterTitle ?? null;
+      figures = Number(s.figures) || 0;
       status = s.status; // "queued" | "processing" | "done" | "error"
       stage = s.stage ?? null; // "transcribing" | "transcribed" | "enriching" | "done"
       detectedPage = s.detectedPage ?? null;
+      sourceLanguage = s.sourceLanguage ?? null; // lets the app adopt the book's language on first sync
+      machineTranslated = s.machineTranslated === true;
     } catch {
       /* no status file (e.g. a migrated page) — infer from lesson.json below */
     }
@@ -176,7 +263,11 @@ async function listBookPages(book) {
     const audio = await fs
       .access(path.join(pdir, "audio", "manifest.json"))
       .then(() => true, () => false);
-    pages.push({ page: pageNum, status, stage, sentences, pageTitle, detectedPage, audio });
+    const image = await fs.access(path.join(pdir, "source.jpg")).then(() => true, () => false);
+    pages.push({
+      page: pageNum, status, stage, sentences, pageTitle, detectedPage, audio, image, figures,
+      chapter, chapterTitle, sourceLanguage, machineTranslated,
+    });
   }
   pages.sort((a, b) => a.page - b.page);
   return pages;
@@ -424,6 +515,7 @@ function fmtElapsed(ms) {
 function dashStage(j) {
   if (j.status === "pending") return "queued";
   if (j.stage === "transcribe") return "transcribing";
+  if (j.stage === "translate") return "translating";
   if (j.stage === "enrich") {
     return j.chunkTotal > 1 ? `enriching ${j.chunkDone}/${j.chunkTotal} chunks` : "enriching";
   }
@@ -547,19 +639,26 @@ async function recoverPending() {
       const hasTranscript = await fs
         .access(path.join(pdir, "transcript.json"))
         .then(() => true, () => false);
+      const hasOriginal = await fs
+        .access(path.join(pdir, "original.json"))
+        .then(() => true, () => false);
       let base64;
       try {
         base64 = (await fs.readFile(path.join(pdir, "source.jpg"))).toString("base64");
       } catch {
         base64 = undefined;
       }
-      if (!hasTranscript && !base64) continue; // nothing to resume from
+      if (!hasTranscript && !hasOriginal && !base64) continue; // nothing to resume from
       const { id } = createJob({ book: st.book || b.name, page: Number(m[1]) });
       enqueueJob({
         id,
         image: base64,
         model: st.model || undefined,
-        langs: { sourceLanguage: st.sourceLanguage, targetLanguage: st.targetLanguage },
+        langs: {
+          sourceLanguage: st.sourceLanguage,
+          targetLanguage: st.targetLanguage,
+          originalLanguage: st.originalLanguage || undefined,
+        },
       });
       recovered++;
     }
@@ -722,6 +821,19 @@ function validateLesson(lesson) {
     throw new Error("Reply was not in the expected lesson shape.");
   }
   if (!("pageTitle" in lesson)) lesson.pageTitle = null;
+  // Normalize the occasional bare-array paragraph ([{dutch,…}] instead of
+  // {sentences:[…]}) — the app's importer expects the wrapped form.
+  lesson.paragraphs = lesson.paragraphs.map((p) => (Array.isArray(p) ? { sentences: p } : p));
+  for (const p of lesson.paragraphs) {
+    if (!p || !Array.isArray(p.sentences)) throw new Error("Reply was not in the expected lesson shape.");
+    for (const s of p.sentences) {
+      if (typeof s?.dutch !== "string" || typeof s?.english !== "string") {
+        throw new Error("Reply was not in the expected lesson shape.");
+      }
+      if (!Array.isArray(s.words)) s.words = [];
+      if (!Array.isArray(s.notes)) s.notes = [];
+    }
+  }
   return lesson;
 }
 function validateTranscript(t) {
@@ -794,19 +906,23 @@ function chunkTranscript(t) {
 
 // Run claude once, parse + validate the JSON, retry once with a stricter nudge.
 async function runClaudeJson(promptBase, model, dir, report, validate, tag = "") {
+  let lastError = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     if (attempt === 1) {
-      report("Reply wasn't valid JSON — retrying…");
-      log(`${tag} reply wasn't valid JSON — retrying with a stricter nudge`);
+      report("Reply was rejected — retrying…");
+      log(`${tag} reply rejected (${lastError?.message || "invalid"}) — retrying with a stricter nudge`);
     }
     const prompt =
       attempt === 0
         ? promptBase
-        : promptBase + "\n\nIMPORTANT: Return ONLY raw minified JSON. No prose, no markdown.";
+        : promptBase +
+          `\n\nIMPORTANT: Your previous reply was rejected: ${lastError?.message || "not valid JSON"}. ` +
+          "Return ONLY raw minified JSON. No prose, no markdown.";
     const reply = await runClaudeWithBackoff(prompt, model, dir, report, tag);
     try {
       return validate(parseModelJson(reply));
     } catch (e) {
+      lastError = e;
       if (attempt === 1) throw e;
     }
   }
@@ -858,7 +974,17 @@ async function patchStatus(book, page, patch) {
 
 let narrateActive = 0;
 const narrateQueue = [];
+// NARRATE=0 skips stage 3 entirely (device TTS is used instead) — handy for a
+// big batch build where local synthesis would take hours.
+const NARRATE_DISABLED = /^(0|false|off|no)$/i.test(String(process.env.NARRATE ?? "1"));
 function queueNarration(book, page) {
+  if (NARRATE_DISABLED) {
+    if (!queueNarration.hintedOff) {
+      queueNarration.hintedOff = true;
+      log("♪ narration off (NARRATE=0) — the app will use device voices");
+    }
+    return;
+  }
   (async () => {
     if (!(await checkNarrator())) {
       if (!queueNarration.hinted) {
@@ -1006,8 +1132,10 @@ async function processJob({ id, image, model, langs }) {
   const report = makeReport(null, 0);
   // Stamp durable status, carrying enough to resume after a restart.
   let detectedPage = null; // printed page number the model read off the page
+  // Merge over what's already on disk so ingester-written provenance fields
+  // (origin, pdfPage, originalLanguage, machineTranslated, picture) survive.
   const stamp = (extra) =>
-    writeStatus(job.book, job.page, {
+    patchStatus(job.book, job.page, {
       page: job.page,
       book: job.book,
       model: model || null,
@@ -1022,9 +1150,36 @@ async function processJob({ id, image, model, langs }) {
   try {
     // ── Stage 1: transcribe → commit native.txt + transcript.json ─────────────
     let transcript = await readTranscript(pageDir); // present → resume at stage 2
+    // A PDF-ingested page in another language keeps its original text in
+    // original.json; when it lines up with the transcript sentence for sentence
+    // it is passed through as the lesson's translation (no back-translation).
+    const original = await readOriginal(pageDir);
+    let reference = null;
     if (transcript) {
       report("Resuming from saved transcript…");
       log(`${tag} ↻ transcript already saved — resuming at stage 2`);
+    } else if (original) {
+      const from = langs?.originalLanguage || "English";
+      const to = langs?.sourceLanguage || "French";
+      job.stage = "translate";
+      await stamp({ status: "processing", stage: "translating", startedAt: Date.now() });
+      report(`Translating ${from} → ${to}…`);
+      const tmp = await stashTemp(null);
+      try {
+        try {
+          transcript = await runClaudeJson(translatePrompt(from, to, original), model, tmp, report, validateTranslationOf(original), tag);
+        } catch (e) {
+          log(`${tag} translation wouldn't keep sentence counts (${e.message}) — accepting a free translation`);
+          transcript = await runClaudeJson(translatePrompt(from, to, original), model, tmp, report, validateTranscript, tag);
+        }
+      } finally {
+        fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
+      }
+      if (transcript.pageNumber == null) transcript.pageNumber = original.pageNumber ?? null;
+      await fs.writeFile(path.join(pageDir, "transcript.json"), JSON.stringify(transcript) + "\n", "utf8");
+      await fs.writeFile(path.join(pageDir, "native.txt"), transcriptText(transcript), "utf8");
+      await stamp({ status: "processing", stage: "transcribed", sentences: countSentences(transcript) });
+      log(`${tag} ✓ stage 1b: translated ${from} → ${to}, ${countSentences(transcript)} sentences (${((Date.now() - t0) / 1000).toFixed(0)}s)`);
     } else {
       if (!image) throw new Error("No image available to transcribe.");
       job.stage = "transcribe";
@@ -1057,6 +1212,11 @@ async function processJob({ id, image, model, langs }) {
     await stamp({ status: "processing", stage: "enriching" });
     report("Writing the lesson…");
     const chunks = chunkTranscript(transcript);
+    if (original && sameShape(original, transcript)) {
+      reference = chunkTranscript(original); // same lengths → same grouping
+    } else if (original) {
+      log(`${tag} original text doesn't line up sentence for sentence — translation will be Claude's own`);
+    }
     job.chunkTotal = chunks.length;
     const chunkChars = new Array(chunks.length).fill(0);
     if (chunks.length > 1) log(`${tag} stage 2: fanning out into ${chunks.length} parallel chunks`);
@@ -1064,19 +1224,26 @@ async function processJob({ id, image, model, langs }) {
       chunks.map(async (paragraphs, i) => {
         const tmp2 = await stashTemp(null); // text-only, no image needed
         try {
-          const part = await runClaudeJson(
-            enrichPrompt(
-              langs?.sourceLanguage,
-              langs?.targetLanguage,
-              { pageTitle: i === 0 ? transcript.pageTitle ?? null : null, paragraphs },
-              chunks.length > 1,
-            ),
-            model,
-            tmp2,
-            makeReport(chunkChars, i),
-            validateLesson,
-            tag,
+          const prompt = enrichPrompt(
+            langs?.sourceLanguage,
+            langs?.targetLanguage,
+            { pageTitle: i === 0 ? transcript.pageTitle ?? null : null, paragraphs },
+            chunks.length > 1,
+            reference ? reference[i] : null,
           );
+          let part;
+          if (reference) {
+            // With a reference translation the entries must pair 1:1; insist,
+            // and only fall back to a free-form lesson if Claude won't comply.
+            try {
+              part = await runClaudeJson(prompt, model, tmp2, makeReport(chunkChars, i), validateLessonOf(paragraphs), tag);
+            } catch (e) {
+              log(`${tag} chunk ${i + 1} wouldn't keep one entry per sentence (${e.message}) — accepting free-form`);
+              part = await runClaudeJson(prompt, model, tmp2, makeReport(chunkChars, i), validateLesson, tag);
+            }
+          } else {
+            part = await runClaudeJson(prompt, model, tmp2, makeReport(chunkChars, i), validateLesson, tag);
+          }
           job.chunkDone++;
           if (chunks.length > 1) log(`${tag} ✓ chunk ${i + 1}/${chunks.length} done`);
           return part;
@@ -1198,6 +1365,37 @@ const server = http.createServer((req, res) => {
   }
 
   // Serve a page's source image so the reader can show the artwork.
+  // Illustrations extracted from a PDF page: the list, then each file.
+  //   GET /books/<book>/pages/<n>/figures          → { figures: [{ file, afterParagraph, width, height }] }
+  //   GET /books/<book>/pages/<n>/figures/<file>   → image/jpeg
+  if (req.method === "GET" && req.url.match(/^\/books\/.+\/pages\/\d+\/figures(\/[A-Za-z0-9._-]+)?$/)) {
+    const mm = decodeURIComponent(req.url).match(/^\/books\/(.+)\/pages\/(\d+)\/figures(?:\/([A-Za-z0-9._-]+))?$/);
+    const pdir = path.join(PROJECTS_DIR, safeBookName(mm[1]), `Page${Number(mm[2])}`);
+    (async () => {
+      if (!mm[3]) {
+        try {
+          send(res, 200, JSON.parse(await fs.readFile(path.join(pdir, "figures.json"), "utf8")));
+        } catch {
+          send(res, 404, { error: "No figures for that page." });
+        }
+        return;
+      }
+      try {
+        const buf = await fs.readFile(path.join(pdir, mm[3]));
+        res.writeHead(200, {
+          "content-type": "image/jpeg",
+          "content-length": buf.length,
+          "access-control-allow-origin": "*",
+          "cache-control": "no-cache",
+        });
+        res.end(buf);
+      } catch {
+        send(res, 404, { error: "No such figure." });
+      }
+    })().catch((e) => send(res, 500, { error: e.message }));
+    return;
+  }
+
   if (req.method === "GET" && req.url.match(/^\/books\/.+\/pages\/\d+\/image$/)) {
     const mm = decodeURIComponent(req.url).match(/^\/books\/(.+)\/pages\/(\d+)\/image$/);
     const file = path.join(PROJECTS_DIR, safeBookName(mm[1]), `Page${Number(mm[2])}`, "source.jpg");
@@ -1254,14 +1452,17 @@ const server = http.createServer((req, res) => {
       const hasTranscript = await fs
         .access(path.join(pdir, "transcript.json"))
         .then(() => true, () => false);
+      const hasOriginal = await fs
+        .access(path.join(pdir, "original.json"))
+        .then(() => true, () => false);
       let base64;
       try {
         base64 = (await fs.readFile(path.join(pdir, "source.jpg"))).toString("base64");
       } catch {
         base64 = undefined;
       }
-      if (!hasTranscript && !base64) {
-        return send(res, 404, { error: "Nothing to retry — no transcript or image on disk." });
+      if (!hasTranscript && !hasOriginal && !base64) {
+        return send(res, 404, { error: "Nothing to retry — no transcript, original text, or image on disk." });
       }
       let st = {};
       try {
@@ -1270,12 +1471,16 @@ const server = http.createServer((req, res) => {
         /* fall back to no model/langs */
       }
       const { id } = createJob({ book, page });
-      log(`↻ retry requested for "${safeBookName(book)}" page ${page} (${hasTranscript ? "from transcript" : "from image"})`);
+      log(`↻ retry requested for "${safeBookName(book)}" page ${page} (${hasTranscript ? "from transcript" : hasOriginal ? "from original text" : "from image"})`);
       enqueueJob({
         id,
         image: base64,
         model: st.model || undefined,
-        langs: { sourceLanguage: st.sourceLanguage, targetLanguage: st.targetLanguage },
+        langs: {
+          sourceLanguage: st.sourceLanguage,
+          targetLanguage: st.targetLanguage,
+          originalLanguage: st.originalLanguage || undefined,
+        },
       });
       send(res, 202, { ok: true, jobId: id, page });
     })().catch((e) => send(res, 500, { error: e.message || "Retry failed." }));
