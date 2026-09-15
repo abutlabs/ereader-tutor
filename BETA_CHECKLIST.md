@@ -48,6 +48,25 @@ npx eas-cli@latest build -p android --profile preview
 
 ## ⚠️ Before ANY Play Store release: remove beta-only content
 
+**Atlas de Tolkien** (David Day; French machine translation of a purchased
+English edition) is a private birthday-gift build, bundled as a package that
+installs itself on first launch. Before submitting to Play:
+- delete `assets/books/atlas-de-tolkien.zip`
+- remove its entry from `BUNDLED_BOOKS` in `src/storage/bundled.ts`
+- run `npm run typecheck`
+
+**Le Petit Prince / De Kleine Prins** (Saint-Exupéry; French and Dutch editions
+with Claude lessons) are bundled the same way as starter books for private
+builds. The French original is public domain in most countries but the Dutch
+translation is not, and both packages were built from purchased PDFs — treat
+them like the Atlas before any Play release: delete `assets/books/le-petit-prince.zip`
+and `assets/books/de-kleine-prins.zip` and their `BUNDLED_BOOKS` entries.
+
+(To rebuild a package after changing the book on the bridge:
+`python3 bridge/package-book.py "Atlas de Tolkien" --id atlas-de-tolkien --author "David Day" --language fr-FR --out assets/books/atlas-de-tolkien.zip`,
+then a new APK build.)
+
+
 **Otje** (Annie M.G. Schmidt, d. 1995) is under copyright and is bundled for the
 private sideloaded beta only. Before submitting to Play:
 - delete `src/data/otje.ts`
