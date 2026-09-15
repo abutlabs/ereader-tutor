@@ -63,7 +63,7 @@ them like the Atlas before any Play release: delete `assets/books/le-petit-princ
 and `assets/books/de-kleine-prins.zip` and their `BUNDLED_BOOKS` entries.
 
 (To rebuild a package after changing the book on the bridge:
-`python3 bridge/package-book.py "Atlas de Tolkien" --id atlas-de-tolkien --author "David Day" --language fr-FR --out assets/books/atlas-de-tolkien.zip`,
+`python3 bridge/package-book.py "Atlas de Tolkien" --id atlas-de-tolkien --author "David Day" --language fr-FR --figure-max 900 --figure-quality 65 --out assets/books/atlas-de-tolkien.zip`,
 then a new APK build.)
 
 

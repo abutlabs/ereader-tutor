@@ -20,6 +20,12 @@ import sys
 import time
 import zipfile
 
+try:
+    from PIL import Image  # only needed for --figure-max / --figure-quality
+except ImportError:
+    Image = None
+import io
+
 HERE = os.path.dirname(os.path.abspath(__file__))
 PROJECTS = os.environ.get("PROJECTS_DIR", os.path.join(HERE, "..", "projects"))
 
@@ -38,6 +44,10 @@ def main():
     ap.add_argument("--target", default="English", help="language the lessons are written in")
     ap.add_argument("--level", default="A2")
     ap.add_argument("--source", default="", help="provenance / rights note stored in the book")
+    ap.add_argument("--figure-max", type=int, default=0, metavar="PX",
+                    help="re-encode illustrations so the longest side is at most PX (0 = keep as extracted)")
+    ap.add_argument("--figure-quality", type=int, default=0, metavar="Q",
+                    help="JPEG quality when re-encoding (with --figure-max; e.g. 65 for a phone-screen build)")
     ap.add_argument("--out", required=True)
     args = ap.parse_args()
 
@@ -127,7 +137,17 @@ def main():
         z.writestr("book.json", book_json)
         z.writestr("manifest.json", json.dumps(manifest, indent=2, ensure_ascii=False))
         for src, arc in images:
-            z.write(src, arc, compress_type=zipfile.ZIP_STORED)  # JPEGs don't compress
+            if args.figure_max or args.figure_quality:
+                if Image is None:
+                    sys.exit("--figure-max/--figure-quality need Pillow:  pip3 install pillow")
+                im = Image.open(src).convert("RGB")
+                if args.figure_max:
+                    im.thumbnail((args.figure_max, args.figure_max), Image.LANCZOS)
+                buf = io.BytesIO()
+                im.save(buf, "JPEG", quality=args.figure_quality or 80, optimize=True, progressive=True)
+                z.writestr(arc, buf.getvalue(), compress_type=zipfile.ZIP_STORED)
+            else:
+                z.write(src, arc, compress_type=zipfile.ZIP_STORED)  # JPEGs don't compress
     n_s = sum(len(p) for pg in pages for p in pg["paragraphs"])
     print(f"✓ {args.out}: {len(pages)} pages, {n_s} sentences, {len(images)} illustrations, "
           f"{len(chapters)} chapters, {os.path.getsize(args.out) / 1e6:.1f} MB")

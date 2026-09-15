@@ -8,17 +8,25 @@
       "developmentClient": true,
       "distribution": "internal",
       "node": "20.19.4",
-      "android": { "buildType": "apk" }
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleDebug -PreactNativeArchitectures=arm64-v8a"
+      }
     },
     "preview": {
       "distribution": "internal",
       "node": "20.19.4",
-      "android": { "buildType": "apk" }
+      "android": {
+        "buildType": "apk",
+        "gradleCommand": ":app:assembleRelease -PreactNativeArchitectures=arm64-v8a"
+      }
     },
     "production": {
       "autoIncrement": true,
       "node": "20.19.4",
-      "android": { "buildType": "app-bundle" }
+      "android": {
+        "buildType": "app-bundle"
+      }
     }
   },
   "submit": {
