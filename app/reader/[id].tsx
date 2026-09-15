@@ -2,11 +2,11 @@
 // learned-progress, and the tap-to-translate sheet. Audio uses native voices.
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Image, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
+import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
-import type { Book, Sentence } from "../../src/data/schema";
+import type { Book, Figure, Sentence } from "../../src/data/schema";
 import { getBook } from "../../src/storage/books";
 import {
   type DailyState,
@@ -20,6 +20,7 @@ import {
 import { loadWordlist, savedKeys, toggleWord } from "../../src/storage/wordlist";
 import { onSpeakingChange, speak, stop } from "../../src/audio/speech";
 import SentenceSheet from "../../src/components/SentenceSheet";
+import { bookChapters } from "../../src/data/chapters";
 import Ring from "../../src/components/Ring";
 import Flame from "../../src/components/Flame";
 import SessionComplete from "../../src/components/SessionComplete";
@@ -38,6 +39,8 @@ export default function ReaderScreen() {
   const [savedWords, setSavedWords] = useState<Set<string>>(new Set());
   const [slow, setSlow] = useState(false);
   const [speakingId, setSpeakingId] = useState<string | null>(null);
+  const [imageRatio, setImageRatio] = useState<number | null>(null); // page photo w/h
+  const [zoomed, setZoomed] = useState<string | null>(null); // uri of the image shown full-screen
   const [daily, setDaily] = useState<DailyState | null>(null);
   const [sessionDone, setSessionDone] = useState(false);
   const hydrated = useRef(false);
@@ -99,6 +102,44 @@ export default function ReaderScreen() {
     [page],
   );
   const doneCount = allSentences.filter((s) => learned.has(s.id)).length;
+  // A page with artwork but no text (a map, a full-page illustration) is shown
+  // whole so it can be matched against the physical book; text pages keep a
+  // strip of the page photo that opens full-screen on tap.
+  const pictureOnly = allSentences.length === 0 && !!page?.imageUri;
+  // Illustrations extracted from a PDF page, keyed by the paragraph they follow.
+  const figuresAfter = useMemo(() => {
+    const m = new Map<number, Figure[]>();
+    const n = page?.paragraphs.length ?? 0;
+    for (const f of page?.figures ?? []) {
+      const k = Math.max(0, Math.min(n, f.afterParagraph));
+      m.set(k, [...(m.get(k) ?? []), f]);
+    }
+    return m;
+  }, [page]);
+  const renderFigures = (k: number) =>
+    (figuresAfter.get(k) ?? []).map((f) => (
+      <Pressable key={f.uri} onPress={() => setZoomed(f.uri)} accessibilityLabel="Show the illustration full-screen">
+        <Image
+          source={{ uri: f.uri }}
+          style={[styles.figure, { aspectRatio: f.width && f.height ? f.width / f.height : 4 / 3 }, focusing && styles.dim]}
+          resizeMode="contain"
+        />
+      </Pressable>
+    ));
+  useEffect(() => {
+    setImageRatio(null);
+    setZoomed(null);
+    if (!page?.imageUri) return;
+    let live = true;
+    Image.getSize(
+      page.imageUri,
+      (w, h) => live && h > 0 && setImageRatio(w / h),
+      () => {},
+    );
+    return () => {
+      live = false;
+    };
+  }, [page?.imageUri]);
 
   function onSpeak(text: string, localId: string) {
     // The sentence button prefers the bridge-narrated recording once synced;
@@ -154,8 +195,26 @@ export default function ReaderScreen() {
         title={book.meta.title}
         subtitle={`${page.title ? page.title + " · " : ""}p.${page.page}`}
         onBack={() => router.back()}
+        onContents={() => router.push({ pathname: "/contents/[id]", params: { id: id! } })}
         daily={daily}
       />
+
+      {/* Contents shortcut — the book's table of contents, one tap from any page */}
+      <Pressable
+        style={styles.tocBtn}
+        onPress={() => router.push({ pathname: "/contents/[id]", params: { id: id! } })}
+        hitSlop={8}
+        accessibilityLabel="Table of contents"
+      >
+        <Feather name="list" size={16} color={colors.inkSoft} />
+        <Text style={styles.tocText} numberOfLines={1}>
+          {(() => {
+            const toc = bookChapters(book);
+            const n = toc.chapterOf(pageIdx);
+            return (n != null && toc.chapters.find((c) => c.number === n)?.title) || "Contents";
+          })()}
+        </Text>
+      </Pressable>
 
       {/* Top page nav */}
       <PageNav
@@ -171,11 +230,18 @@ export default function ReaderScreen() {
         showsVerticalScrollIndicator={false}
       >
         {page.imageUri ? (
-          <Image
-            source={{ uri: page.imageUri }}
-            style={[styles.pageImage, focusing && styles.dim]}
-            resizeMode="cover"
-          />
+          <Pressable onPress={() => setZoomed(page.imageUri!)} accessibilityLabel="Show the page photo full-screen">
+            <Image
+              source={{ uri: page.imageUri }}
+              style={[
+                pictureOnly
+                  ? [styles.pageImageFull, { aspectRatio: imageRatio ?? 0.75 }]
+                  : styles.pageImage,
+                focusing && styles.dim,
+              ]}
+              resizeMode={pictureOnly ? "contain" : "cover"}
+            />
+          </Pressable>
         ) : null}
         {page.title ? (
           <Text style={[styles.chapterTitle, focusing && styles.dim]}>{page.title}</Text>
@@ -183,9 +249,11 @@ export default function ReaderScreen() {
         {page.preamble ? (
           <Text style={[styles.preamble, focusing && styles.dim]}>{page.preamble}</Text>
         ) : null}
+        {renderFigures(0)}
 
         {page.paragraphs.map((para, pi) => (
-          <Text key={pi} style={styles.paragraph}>
+          <View key={pi}>
+          <Text style={styles.paragraph}>
             {para.map((s, si) => {
               const isActive = active?.id === s.id;
               const isLearned = learned.has(s.id);
@@ -227,6 +295,8 @@ export default function ReaderScreen() {
               );
             })}
           </Text>
+          {renderFigures(pi + 1)}
+          </View>
         ))}
 
         <Text style={styles.ornament}>⁂</Text>
@@ -243,6 +313,25 @@ export default function ReaderScreen() {
         onNext={() => goTo(pageIdx + 1)}
         filled
       />
+
+      {/* Full-screen image — a page photo or an illustration, to find your place in the physical book. */}
+
+      <Modal visible={!!zoomed} transparent animationType="fade" onRequestClose={() => setZoomed(null)}>
+
+        <Pressable style={styles.zoomBackdrop} onPress={() => setZoomed(null)}>
+
+          {zoomed ? <Image source={{ uri: zoomed }} style={styles.zoomImage} resizeMode="contain" /> : null}
+
+          <Text style={styles.zoomHint}>
+
+            {page?.title ? `${page.title} · ` : ""}page {page?.page} · tap to close
+
+          </Text>
+
+        </Pressable>
+
+      </Modal>
+
 
       <SentenceSheet
         sentence={active}
@@ -275,11 +364,13 @@ function ReaderHeader({
   title,
   subtitle,
   onBack,
+  onContents,
   daily,
 }: {
   title: string;
   subtitle?: string;
   onBack: () => void;
+  onContents?: () => void;
   daily: DailyState | null;
 }) {
   return (
@@ -287,6 +378,11 @@ function ReaderHeader({
       <Pressable onPress={onBack} hitSlop={10} style={{ marginRight: spacing(1) }}>
         <Feather name="chevron-left" size={24} color={colors.ink} />
       </Pressable>
+      {onContents ? (
+        <Pressable onPress={onContents} hitSlop={10} style={{ marginRight: spacing(2) }} accessibilityLabel="Table of contents">
+          <Feather name="list" size={22} color={colors.accent} />
+        </Pressable>
+      ) : null}
       <View style={{ flex: 1, minWidth: 0 }}>
         <Text style={styles.headerTitle} numberOfLines={1}>
           {title}
@@ -427,6 +523,41 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     marginBottom: spacing(5),
     backgroundColor: colors.paperSoft,
+  },
+  figure: {
+    width: "100%",
+    borderRadius: radius.md,
+    marginBottom: spacing(5),
+    backgroundColor: colors.paperSoft,
+  },
+  tocBtn: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing(2),
+    alignSelf: "center",
+    paddingHorizontal: spacing(3),
+    paddingVertical: spacing(1),
+  },
+  tocText: { fontFamily: fonts.body, fontSize: 13, color: colors.inkSoft },
+  pageImageFull: {
+    width: "100%",
+    borderRadius: radius.md,
+    marginBottom: spacing(5),
+    backgroundColor: colors.paperSoft,
+  },
+  zoomBackdrop: {
+    flex: 1,
+    backgroundColor: "rgba(20, 16, 12, 0.96)",
+    justifyContent: "center",
+    alignItems: "center",
+    padding: spacing(3),
+  },
+  zoomImage: { width: "100%", height: "88%" },
+  zoomHint: {
+    color: "rgba(255,255,255,0.7)",
+    fontFamily: fonts.body,
+    fontSize: 13,
+    marginTop: spacing(3),
   },
   chapterTitle: {
     fontFamily: fonts.displayBold,

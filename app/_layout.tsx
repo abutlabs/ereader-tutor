@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
@@ -16,6 +16,7 @@ import {
 } from "@expo-google-fonts/dm-sans";
 import { SafeAreaProvider } from "react-native-safe-area-context";
 import { colors } from "../src/theme/theme";
+import { ensureBundledBooks } from "../src/storage/bundled";
 
 SplashScreen.preventAutoHideAsync();
 
@@ -31,12 +32,19 @@ export default function RootLayout() {
     DMSans_700Bold,
   });
 
+  // Bundled books (assets/books/*.zip) install on first launch, behind the
+  // splash screen so the library is complete the first time the home screen shows.
+  const [booksReady, setBooksReady] = useState(false);
+  useEffect(() => {
+    ensureBundledBooks().finally(() => setBooksReady(true));
+  }, []);
+
   useEffect(() => {
     if (fontError) console.warn("Font loading failed:", fontError);
-    if (loaded || fontError) SplashScreen.hideAsync();
-  }, [loaded, fontError]);
+    if ((loaded || fontError) && booksReady) SplashScreen.hideAsync();
+  }, [loaded, fontError, booksReady]);
 
-  if (!loaded && !fontError) return null;
+  if ((!loaded && !fontError) || !booksReady) return null;
 
   return (
     <SafeAreaProvider>

@@ -330,6 +330,34 @@ export interface BridgePageInfo {
   pageTitle: string | null;
   detectedPage: number | null; // page number the model read off the printed page
   audio?: boolean; // true once the bridge's narrator has finished this page
+  sourceLanguage?: string | null; // language name the bridge built the page in (e.g. "French")
+  machineTranslated?: boolean; // page text was machine-translated from another edition
+  image?: boolean; // the bridge has a full-page photo/render for this page
+  figures?: number; // number of extracted illustrations (PDF-ingested pages)
+  chapter?: number | null; // chapter number this page belongs to
+  chapterTitle?: string | null;
+}
+
+export interface BridgeFigure {
+  file: string;
+  afterParagraph: number;
+  width?: number | null;
+  height?: number | null;
+}
+
+// The list of a page's illustrations, or [] when the bridge has none.
+export async function fetchBridgeFigures(bridgeUrl: string, book: string, page: number): Promise<BridgeFigure[]> {
+  try {
+    const res = await fetch(`${bridgeUrl}/books/${encodeURIComponent(book)}/pages/${page}/figures`);
+    if (!res.ok) return [];
+    const json = await res.json();
+    return Array.isArray(json?.figures) ? (json.figures as BridgeFigure[]) : [];
+  } catch {
+    return [];
+  }
+}
+export function bridgeFigureUrl(bridgeUrl: string, book: string, page: number, file: string): string {
+  return `${bridgeUrl}/books/${encodeURIComponent(book)}/pages/${page}/figures/${encodeURIComponent(file)}`;
 }
 
 // Re-label a page on the bridge: rename its Page<old> folder to Page<new>.

@@ -9,6 +9,7 @@ import { useFocusEffect, useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { Book } from "../../src/data/schema";
 import { getBook } from "../../src/storage/books";
+import { bookChapters } from "../../src/data/chapters";
 import {
   getApiKey,
   getBridgeUrl,
@@ -199,11 +200,9 @@ export default function BookScreen() {
   }
 
   // Map declared chapters to whether any pages are built, and the first page index.
-  const chapters = (book.meta.chapters ?? []).map((ch) => {
-    const firstIdx = book.pages.findIndex((p) => p.chapter === ch.number);
-    const count = book.pages.filter((p) => p.chapter === ch.number).length;
-    return { ...ch, firstIdx, count, available: firstIdx !== -1 };
-  });
+  // Chapters from metadata, or derived from page titles — the table of
+  // contents is always reachable, sync or no sync.
+  const chapters = bookChapters(book).chapters.map((ch) => ({ ...ch, available: ch.firstIdx !== -1 }));
 
   const open = (pageIdx: number) =>
     router.push({ pathname: "/reader/[id]", params: { id: book.id, start: String(pageIdx) } });
@@ -260,14 +259,20 @@ export default function BookScreen() {
 
         {book.pages.length > 0 ? (
           <>
-            <Pressable style={styles.beginBtn} onPress={resume}>
-              <Text style={styles.beginText}>Begin reading</Text>
-              <Feather name="arrow-right" size={18} color={colors.accent} />
-            </Pressable>
-            <Pressable style={styles.contentsBtn} onPress={() => router.push(`/contents/${book.id}`)}>
-              <Feather name="list" size={16} color={colors.inkSoft} />
-              <Text style={styles.contentsText}>Contents</Text>
-            </Pressable>
+            <View style={styles.primaryRow}>
+              <Pressable style={[styles.beginBtn, { flex: 1 }]} onPress={resume}>
+                <Text style={styles.beginText}>Continue reading</Text>
+                <Feather name="arrow-right" size={18} color={colors.accent} />
+              </Pressable>
+              <Pressable
+                style={[styles.beginBtn, styles.contentsBtn]}
+                onPress={() => router.push(`/contents/${book.id}`)}
+                accessibilityLabel="Table of contents"
+              >
+                <Feather name="list" size={18} color={colors.accent} />
+                <Text style={styles.beginText}>Contents</Text>
+              </Pressable>
+            </View>
           </>
         ) : (
           <Text style={styles.empty}>
@@ -401,15 +406,8 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
     color: colors.inkSoft,
   },
-  contentsBtn: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing(2),
-    paddingVertical: spacing(3),
-    marginTop: spacing(3),
-  },
-  contentsText: { fontFamily: fonts.ui, fontSize: 15, color: colors.inkSoft },
+  primaryRow: { flexDirection: "row", gap: spacing(2), alignItems: "stretch" },
+  contentsBtn: { paddingHorizontal: spacing(4) },
   scanBtn: {
     flexDirection: "row",
     alignItems: "center",

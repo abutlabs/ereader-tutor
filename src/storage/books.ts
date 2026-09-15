@@ -30,6 +30,9 @@ export function scansDir(id: string) {
 export function pageImagePath(id: string, pageNum: number) {
   return `${bookDir(id)}images/Page${pageNum}.jpg`;
 }
+export function pageFigurePath(id: string, pageNum: number, file: string) {
+  return `${bookDir(id)}images/Page${pageNum}-${file}`;
+}
 export async function ensureImagesDir(id: string) {
   await ensureDir(`${bookDir(id)}images/`);
 }
@@ -211,6 +214,22 @@ export async function setPageImage(
     p.imageUri = imageUri;
     await saveBook(book);
   }
+}
+
+// Patch a page's non-content fields (figures, chapter, image) without touching
+// its sentences or ids.
+export async function patchPage(
+  id: string,
+  pageNum: number,
+  patch: Partial<Pick<Page, "figures" | "chapter" | "imageUri" | "title">>,
+): Promise<void> {
+  const book = await getBook(id);
+  if (!book) return;
+  const p = book.pages.find((pp) => pp.page === pageNum);
+  if (!p) return;
+  Object.assign(p, patch);
+  if (patch.imageUri === undefined && "imageUri" in patch) delete p.imageUri;
+  await saveBook(book);
 }
 
 // Attach narrated-audio file paths to a page's sentences by (paragraph, sentence)

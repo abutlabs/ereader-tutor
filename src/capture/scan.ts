@@ -7,8 +7,8 @@
 import * as ImagePicker from "expo-image-picker";
 import { manipulateAsync, SaveFormat } from "expo-image-manipulator";
 import * as FileSystem from "expo-file-system/legacy";
-import type { Book } from "../data/schema";
-import { languageName, DEFAULT_TARGET_LANGUAGE } from "../data/languages";
+import type { Book, Figure } from "../data/schema";
+import { languageName, languageCode, DEFAULT_TARGET_LANGUAGE } from "../data/languages";
 import {
   appendPage,
   ensureImagesDir,
@@ -20,10 +20,15 @@ import {
   setPageAudio,
   setPageImage,
   upsertPage,
+  updateBookMeta,
+  pageFigurePath,
+  patchPage,
 } from "../storage/books";
 import { moveLearned } from "../storage/progress";
 import {
   bridgeAudioFileUrl,
+  bridgeFigureUrl,
+  fetchBridgeFigures,
   fetchBridgeAudioManifest,
   fetchBridgePageLesson,
   imageToLesson,
@@ -228,6 +233,37 @@ async function downloadPageImage(
   }
 }
 
+// Download a PDF-ingested page's illustrations (figures) into the book's
+// images folder. Returns [] when the page has none.
+async function downloadPageFigures(
+  bridgeUrl: string,
+  book: string,
+  page: number,
+  bookId: string,
+): Promise<Figure[]> {
+  const list = await fetchBridgeFigures(bridgeUrl, book, page);
+  if (!list.length) return [];
+  await ensureImagesDir(bookId);
+  const out: Figure[] = [];
+  for (const f of list) {
+    try {
+      const dest = pageFigurePath(bookId, page, f.file);
+      const res = await FileSystem.downloadAsync(bridgeFigureUrl(bridgeUrl, book, page, f.file), dest);
+      if (res.status === 200) {
+        out.push({
+          uri: res.uri,
+          afterParagraph: f.afterParagraph ?? 0,
+          width: f.width ?? undefined,
+          height: f.height ?? undefined,
+        });
+      }
+    } catch {
+      /* skip a missing figure */
+    }
+  }
+  return out;
+}
+
 // Download a page's narrated sentence audio from the bridge for offline
 // playback. Returns "pg<para>_s<sent>" -> local file uri, or null if the page
 // has no audio yet. Already-downloaded files are kept (cheap re-sync). Optional
@@ -283,6 +319,26 @@ export async function syncFromBridge(
   ).length;
   const byPage = new Map(book.pages.map((p) => [p.page, p]));
 
+  // A book created on the phone starts as Dutch; on its first sync adopt the
+  // language the bridge actually built the pages in (a PDF-ingested French
+  // book, say) so TTS voices and prompts match. Also record machine translation
+  // in the provenance note so the reader knows the text isn't a published edition.
+  if (book.pages.length === 0 && remote.length) {
+    const counts = new Map<string, number>();
+    for (const r of remote) if (r.sourceLanguage) counts.set(r.sourceLanguage, (counts.get(r.sourceLanguage) ?? 0) + 1);
+    const top = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
+    const code = languageCode(top);
+    const patch: Partial<Book["meta"]> = {};
+    if (code && code.split("-")[0] !== (book.meta.language || "").split("-")[0]) patch.language = code;
+    if (remote.some((r) => r.machineTranslated) && !book.meta.source) {
+      patch.source = `Machine-translated into ${top} by Claude from another edition; the translations are that edition's own text.`;
+    }
+    if (Object.keys(patch).length) {
+      onPhase(`Setting book language to ${top}…`);
+      await updateBookMeta(bookId, patch);
+    }
+  }
+
   let updated: Book | null = book;
   let imported = 0;
   for (const r of done) {
@@ -290,7 +346,8 @@ export async function syncFromBridge(
     if (!local) {
       onPhase(`Importing page ${r.page}…`);
       const lesson = await fetchBridgePageLesson(bridgeUrl, title, r.page);
-      const imageUri = await downloadPageImage(bridgeUrl, title, r.page, bookId);
+      const imageUri = r.image === false ? undefined : await downloadPageImage(bridgeUrl, title, r.page, bookId);
+      const figures = r.figures ? await downloadPageFigures(bridgeUrl, title, r.page, bookId) : [];
       const paragraphs = lessonToParagraphs(lesson);
       if (r.audio) {
         onPhase(`Downloading audio for page ${r.page}…`);
@@ -308,11 +365,30 @@ export async function syncFromBridge(
         title: lesson.pageTitle ?? undefined,
         detectedPage: r.detectedPage,
         imageUri,
+        figures: figures.length ? figures : undefined,
+        chapter: r.chapter ?? undefined,
         paragraphs,
       });
       imported++;
     } else {
-      if (!local.imageUri) {
+      // A page synced before the bridge extracted illustrations: swap the
+      // full-page render for the figures, and pick up its chapter.
+      const patch: Parameters<typeof patchPage>[2] = {};
+      if (r.figures && !(local.figures && local.figures.length)) {
+        onPhase(`Downloading illustrations for page ${r.page}…`);
+        const figures = await downloadPageFigures(bridgeUrl, title, r.page, bookId);
+        if (figures.length) patch.figures = figures;
+      }
+      if (r.image === false && local.imageUri) {
+        FileSystem.deleteAsync(local.imageUri, { idempotent: true }).catch(() => {});
+        patch.imageUri = undefined;
+      }
+      if (r.chapter != null && local.chapter !== r.chapter) patch.chapter = r.chapter;
+      if (Object.keys(patch).length) {
+        await patchPage(bookId, r.page, patch);
+        updated = await getBook(bookId);
+      }
+      if (!local.imageUri && r.image !== false) {
         // Backfill artwork for a page imported before image-sync existed.
         const imageUri = await downloadPageImage(bridgeUrl, title, r.page, bookId);
         if (imageUri) {
@@ -329,6 +405,17 @@ export async function syncFromBridge(
           updated = await getBook(bookId);
         }
       }
+    }
+  }
+
+  // Table of contents: the chapters the bridge knows about, in page order.
+  const chapters = new Map<number, string>();
+  for (const r of remote) if (r.chapter != null && r.chapterTitle) chapters.set(r.chapter, r.chapterTitle);
+  if (chapters.size) {
+    const list = [...chapters.entries()].sort((a, b) => a[0] - b[0]).map(([number, t]) => ({ number, title: t }));
+    const cur = (updated ?? book).meta.chapters ?? [];
+    if (JSON.stringify(cur) !== JSON.stringify(list)) {
+      updated = await updateBookMeta(bookId, { chapters: list });
     }
   }
 

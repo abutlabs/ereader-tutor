@@ -23,10 +23,20 @@ export interface Sentence {
 
 export type Paragraph = Sentence[];
 
+// An illustration extracted from a PDF page, shown inline in the reader after
+// paragraph `afterParagraph` (0 = before the first paragraph).
+export interface Figure {
+  uri: string; // local file path
+  afterParagraph: number;
+  width?: number;
+  height?: number;
+}
+
 export interface Page {
   page: number; // page/unit number — used as the storage key for progress
   detectedPage?: number | null; // page number the model read off the printed page
   imageUri?: string; // local path to the page photo (artwork shown in the reader)
+  figures?: Figure[]; // illustrations placed in the text flow (PDF-ingested books)
   chapter?: number;
   title?: string; // optional heading shown above the page
   preamble?: string; // non-interactive text continuing from the prior page

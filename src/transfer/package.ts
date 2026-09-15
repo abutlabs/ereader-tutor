@@ -6,10 +6,11 @@ import JSZip from "jszip";
 import * as FileSystem from "expo-file-system/legacy";
 import * as Crypto from "expo-crypto";
 import * as Sharing from "expo-sharing";
-import type { Book, Page } from "../data/schema";
+import type { Book, Figure, Page } from "../data/schema";
 import {
   ensureImagesDir,
   getBook,
+  pageFigurePath,
   pageImagePath,
   saveBook,
   upsertPage,
@@ -63,7 +64,16 @@ export async function buildPackage(bookId: string, flags: ExportFlags): Promise<
   if (!book) throw new Error("Book not found.");
 
   // Lesson content, minus device-local image paths (re-linked on import).
-  const exportBook: Book = { ...book, pages: book.pages.map((p) => ({ ...p, imageUri: undefined })) };
+  // Local file paths are dropped from book.json and re-linked on import; a
+  // figure's uri becomes its bundled file name.
+  const exportBook: Book = {
+    ...book,
+    pages: book.pages.map((p) => ({
+      ...p,
+      imageUri: undefined,
+      figures: p.figures?.map((f, i) => ({ ...f, uri: `fig${i + 1}.jpg` })),
+    })),
+  };
   const bookJson = JSON.stringify(exportBook);
   const hash = await sha256(bookJson);
 
@@ -89,13 +99,23 @@ export async function buildPackage(bookId: string, flags: ExportFlags): Promise<
   if (flags.photos) {
     const img = zip.folder("images")!;
     for (const p of book.pages) {
-      if (!p.imageUri) continue;
-      try {
-        img.file(`page-${pad3(p.page)}.jpg`, await FileSystem.readAsStringAsync(p.imageUri, { encoding: B64 }), {
-          base64: true,
-        });
-      } catch {
-        /* skip a missing image */
+      if (p.imageUri) {
+        try {
+          img.file(`page-${pad3(p.page)}.jpg`, await FileSystem.readAsStringAsync(p.imageUri, { encoding: B64 }), {
+            base64: true,
+          });
+        } catch {
+          /* skip a missing image */
+        }
+      }
+      for (const [i, f] of (p.figures ?? []).entries()) {
+        try {
+          img.file(`page-${pad3(p.page)}-fig${i + 1}.jpg`, await FileSystem.readAsStringAsync(f.uri, { encoding: B64 }), {
+            base64: true,
+          });
+        } catch {
+          /* skip a missing figure */
+        }
       }
     }
   }
@@ -128,7 +148,7 @@ export async function sharePackage(uri: string): Promise<void> {
 // Pre-build size estimate for the export screen (downsized scans ≈ 0.18 MB each).
 export function estimateSize(pageCount: number, flags: ExportFlags): number {
   let mb = 0.28;
-  if (flags.photos) mb += pageCount * 0.18;
+  if (flags.photos) mb += pageCount * 0.18; // page renders and/or illustrations
   if (flags.progress) mb += 0.04;
   if (flags.wordlist) mb += 0.03;
   return mb * 1024 * 1024;
@@ -173,6 +193,19 @@ export async function installPackage(uri: string, mode: InstallMode): Promise<Bo
     title = `${title} (copy)`;
   }
 
+  const figuresFor = async (p: Page): Promise<Figure[] | undefined> => {
+    if (!p.figures?.length) return undefined;
+    await ensureImagesDir(id);
+    const out: Figure[] = [];
+    for (const [i, f] of p.figures.entries()) {
+      const zf = zip.file(`images/page-${pad3(p.page)}-fig${i + 1}.jpg`);
+      if (!zf) continue;
+      const dest = pageFigurePath(id, p.page, `fig${i + 1}.jpg`);
+      await FileSystem.writeAsStringAsync(dest, await zf.async("base64"), { encoding: B64 });
+      out.push({ ...f, uri: dest });
+    }
+    return out.length ? out : undefined;
+  };
   const imageFor = async (pageNum: number): Promise<string | undefined> => {
     const f = zip.file(`images/page-${pad3(pageNum)}.jpg`);
     if (!f) return undefined;
@@ -191,7 +224,9 @@ export async function installPackage(uri: string, mode: InstallMode): Promise<Bo
       const updated = await upsertPage(id, p.page, {
         title: p.title,
         detectedPage: p.detectedPage,
+        chapter: p.chapter,
         imageUri: await imageFor(p.page),
+        figures: await figuresFor(p),
         paragraphs: p.paragraphs,
       });
       if (updated) book = updated;
@@ -202,7 +237,7 @@ export async function installPackage(uri: string, mode: InstallMode): Promise<Bo
   // new / replace / copy → write the whole book.
   const now = Date.now();
   const pages: Page[] = [];
-  for (const p of incoming.pages) pages.push({ ...p, imageUri: await imageFor(p.page) });
+  for (const p of incoming.pages) pages.push({ ...p, imageUri: await imageFor(p.page), figures: await figuresFor(p) });
   const book: Book = {
     id,
     meta: { ...incoming.meta, title, origin: "import" },

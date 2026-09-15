@@ -17,6 +17,7 @@ import { Feather } from "@expo/vector-icons";
 import type { BookSummary } from "../src/data/schema";
 import { createBook, deleteBook, getBook, listBooks } from "../src/storage/books";
 import { CATALOG, CATALOG_IDS, type CatalogItem } from "../src/data/catalog";
+import { BUNDLED_IDS } from "../src/storage/bundled";
 import { getOwnedIds } from "../src/storage/entitlements";
 import { billing } from "../src/billing";
 import { STORE_ENABLED } from "../src/config";
@@ -132,7 +133,7 @@ export default function LibraryScreen() {
   }
 
   function onLongPress(b: BookSummary) {
-    if (CATALOG_IDS.has(b.id)) return; // bundled books can't be deleted
+    if (CATALOG_IDS.has(b.id) || BUNDLED_IDS.has(b.id)) return; // bundled books can't be deleted
     Alert.alert("Delete project?", `"${b.title}" and its scans.`, [
       { text: "Cancel", style: "cancel" },
       { text: "Delete", style: "destructive", onPress: async () => { await deleteBook(b.id); refresh(); } },
@@ -284,7 +285,17 @@ export default function LibraryScreen() {
           </>
         )}
 
-        {/* Add cluster — content creation/import is developer-only */}
+        {/* Importing a shared .zip package needs no key or bridge, so it's
+            available to everyone — it's how a book built on a laptop reaches
+            a phone running a release build. */}
+        {!creating && (
+          <Pressable style={styles.textBtn} onPress={() => router.push("/import")}>
+            <Feather name="download" size={17} color={colors.inkSoft} />
+            <Text style={styles.textBtnLabel}>Import a book from a .zip</Text>
+          </Pressable>
+        )}
+
+        {/* Add cluster — content creation is developer-only */}
         {dev && (creating ? (
           <View style={styles.createBox}>
             <TextInput
@@ -316,10 +327,6 @@ export default function LibraryScreen() {
             <Pressable style={styles.newBtn} onPress={() => setCreating(true)}>
               <Feather name="plus" size={20} color={colors.accent} />
               <Text style={styles.newBtnText}>New book</Text>
-            </Pressable>
-            <Pressable style={styles.textBtn} onPress={() => router.push("/import")}>
-              <Feather name="download" size={17} color={colors.inkSoft} />
-              <Text style={styles.textBtnLabel}>Import a book from a .zip</Text>
             </Pressable>
             <Pressable style={styles.textBtn} onPress={() => router.push("/add")}>
               <Feather name="book" size={17} color={colors.inkSoft} />
