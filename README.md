@@ -1,13 +1,93 @@
 # EReader Tutor
 
 A language-learning reader for iOS and Android. Photograph a page of a foreign
-book, and Claude turns it into an interactive lesson — tap any sentence for a
+book (or build full books from epub), and Claude turns it into an interactive lesson — tap any sentence for a
 translation, word-by-word breakdown, A2 grammar notes, and native-voice audio.
 Each scan grows a book in local storage; the original page artwork is kept and
 shown alongside the text (great for children's books).
 
 Built on a prototype reader for _Uit het leven van Dik Trom_ (C. J. Kieviet,
 public domain), now a real Expo / React Native app.
+
+---
+
+## Try the current build (v0.1.0)
+
+### Android: sideload the APK
+
+Scan the QR code with your phone to download the sideloadable APK (tap the
+image to open it full size). Enable "install unknown apps" for your browser or
+files app when Android asks.
+
+<a href="ereader-tutor-apk-qr.png"><img src="ereader-tutor-apk-qr.png" alt="QR code linking to the EReader Tutor Android APK" width="220"></a>
+
+This is a release build (arm64 only, ~50 MB): the pure reader experience, with
+the scanning, bridge and API settings hidden. Every book below is installed on
+first launch, so there is something to read straight away.
+
+### iPhone (or Android): open it in Expo Go
+
+No Apple developer account, TestFlight or App Store involved. The app is
+published with EAS Update and runs inside the free **Expo Go** app.
+
+1. Install **Expo Go** from the App Store (or Play Store).
+2. Scan this code with the phone's camera and pick *Open in Expo Go*, or paste
+   the link into Expo Go's *Enter URL manually* field:
+
+   <a href="ereader-tutor-expo-go-qr.png"><img src="ereader-tutor-expo-go-qr.png" alt="QR code that opens EReader Tutor in Expo Go" width="220"></a>
+
+   ```
+   exp://u.expo.dev/de4633f4-d751-4218-84ca-3c2ce841f723?channel-name=preview&runtime-version=exposdk:57.0.0
+   ```
+
+3. First open downloads the bundle and the starter books (about 10 MB); after
+   that it works offline and reopens from Expo Go's *Recently opened* list.
+
+The link always points at the newest update on the `preview` channel, so a
+tester never needs a new link. Expo Go may ask them to sign in with a free Expo
+account before loading a published project. Like the APK, this is a production
+bundle, so the scanning, bridge and API settings are hidden.
+
+#### Publishing a new version to Expo Go
+
+```bash
+npx eas-cli update --channel preview --environment preview --message "what changed"
+```
+
+That re-exports the JS bundle and assets and publishes them; testers get it the
+next time they open the app. Notes:
+
+- The runtime version is pinned to the Expo SDK (`exposdk:57.0.0`, via the
+  `sdkVersion` policy in `app.json`) because that is the only runtime Expo Go
+  will load. After an SDK upgrade, testers need the matching Expo Go from the
+  store and the link's `runtime-version` changes.
+- The same channel feeds the sideload APK: `eas.json` maps the `preview` build
+  profile to the `preview` channel, so an APK built from now on also picks up
+  these updates on launch. Use `--channel production` for Play Store builds.
+- Anything that adds a native module (a new `expo-*` package with native code)
+  won't reach Expo Go and needs a real build instead.
+
+### Starter books in this build
+
+| Book | Author | Read in | Lessons in | Size | Notes |
+| --- | --- | --- | --- | --- | --- |
+| Fabels van Aesopus | Aesop (retold) | Dutch | English | 12 fables | Free starter book |
+| Spreekwoorden & Uitdrukkingen | Dutch folk wisdom | Dutch | English | 20 idiom cards, 5 themes | Free |
+| Uit het leven van Dik Trom | C. Joh. Kieviet | Dutch | English | Chapters 1–2 (7 pages) | Sample of the public-domain classic |
+| Le Petit Prince | Antoine de Saint-Exupéry | French | English | 27 chapters, 86 pages, illustrated | Private build only |
+| De Kleine Prins | Antoine de Saint-Exupéry | Dutch | English | 27 chapters, 61 pages, illustrated | Private build only |
+| Atlas de Tolkien | David Day | French | English | 9 chapters, 178 pages, illustrated | Private build only |
+| Otje | Annie M.G. Schmidt | Dutch | English | 26 pages | Beta only |
+
+**Languages:** source text in **Dutch** and **French**; every lesson
+(translations, word-by-word breakdowns, grammar notes) is written in **English**.
+The engine itself is language-agnostic, and the lesson language is configurable
+per book.
+
+The titles marked *private build only* and *beta only* are copyrighted editions
+bundled for personal study; they are stripped before any Play Store release (see
+[`BETA_CHECKLIST.md`](BETA_CHECKLIST.md)). The three Dutch starter books are the
+public catalog.
 
 ---
 
@@ -47,7 +127,9 @@ npx expo start
 ```
 
 Open it on your phone with **Expo Go** (scan the QR). Everything currently uses
-modules bundled in Expo Go, so no native build is needed.
+modules bundled in Expo Go, so no native build is needed. To hand a build to a
+tester without running Metro, publish it with EAS Update instead — see
+[iPhone (or Android): open it in Expo Go](#iphone-or-android-open-it-in-expo-go).
 
 To use the free **Max-plan bridge**, also run the laptop server (separate
 terminal) and point the app at it — see [`bridge/README.md`](bridge/README.md):
