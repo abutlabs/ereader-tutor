@@ -10,7 +10,8 @@ import type { Book } from "../../src/data/schema";
 import { getBook } from "../../src/storage/books";
 import { loadWordlist, removeWord, type SavedWord } from "../../src/storage/wordlist";
 import { onSpeakingChange, speak, stop } from "../../src/audio/speech";
-import { colors, fonts, radius, spacing } from "../../src/theme/theme";
+import { cardEdge, colors, fonts, radius, spacing } from "../../src/theme/theme";
+import { FORM_COLUMN } from "../../src/theme/layout";
 
 export default function WordlistScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -49,7 +50,7 @@ export default function WordlistScreen() {
       <FlatList
         data={items}
         keyExtractor={(it) => it.nl}
-        contentContainerStyle={{ padding: spacing(5), paddingTop: spacing(2) }}
+        contentContainerStyle={[FORM_COLUMN, { paddingTop: spacing(2) }]}
         ListHeaderComponent={
           items.length ? (
             <Text style={styles.summary}>
@@ -127,6 +128,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     marginBottom: spacing(2),
     backgroundColor: colors.paperSoft,
+    ...cardEdge,
     paddingRight: spacing(2),
   },
   rowActive: { backgroundColor: colors.accentSoft },

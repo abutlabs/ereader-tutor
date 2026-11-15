@@ -11,7 +11,7 @@ import {
   View,
 } from "react-native";
 import { Feather } from "@expo/vector-icons";
-import { colors, fonts, radius, spacing } from "../theme/theme";
+import { colors, fonts, motion, radius, spacing } from "../theme/theme";
 
 export type ScanPhase =
   | { k: "working"; label: string }
@@ -35,7 +35,7 @@ export default function ScanOverlay({
   onScanAnother,
 }: Props) {
   return (
-    <Modal visible={!!phase} transparent animationType="fade" onRequestClose={onCancel}>
+    <Modal visible={!!phase} transparent animationType={motion("fade")} onRequestClose={onCancel}>
       <View style={styles.backdrop}>
         <View style={styles.card}>
           {phase?.k === "working" && (

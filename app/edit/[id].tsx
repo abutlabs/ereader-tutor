@@ -24,6 +24,7 @@ import {
   languageName,
 } from "../../src/data/languages";
 import { colors, fonts, radius, spacing } from "../../src/theme/theme";
+import { FORM_COLUMN } from "../../src/theme/layout";
 
 export default function EditBookScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -83,7 +84,7 @@ export default function EditBookScreen() {
         <View style={{ width: 26 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing(5) }}>
+      <ScrollView contentContainerStyle={FORM_COLUMN}>
         <Text style={styles.label}>Title</Text>
         <Text style={styles.readonly}>{book?.meta.title ?? "…"}</Text>
 

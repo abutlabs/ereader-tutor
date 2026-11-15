@@ -15,6 +15,7 @@ import { getBridgeUrl } from "../../src/storage/apiKey";
 import { relabelPage } from "../../src/capture/scan";
 import NumberPrompt from "../../src/components/NumberPrompt";
 import { colors, fonts, radius, spacing } from "../../src/theme/theme";
+import { FORM_COLUMN } from "../../src/theme/layout";
 
 interface Row {
   idx: number;
@@ -125,7 +126,7 @@ export default function ContentsScreen() {
         sections={sections}
         keyExtractor={(r) => String(r.page)}
         stickySectionHeadersEnabled={false}
-        contentContainerStyle={{ padding: spacing(5), paddingTop: spacing(2) }}
+        contentContainerStyle={[FORM_COLUMN, { paddingTop: spacing(2) }]}
         renderSectionHeader={({ section }) =>
           section.title ? (
             <Pressable style={styles.chapterRow} onPress={() => open(section.firstIdx)}>

@@ -13,7 +13,8 @@ import {
   type InstallMode,
   type PackagePreview,
 } from "../src/transfer/package";
-import { colors, fonts, radius, spacing } from "../src/theme/theme";
+import { cardEdge, colors, fonts, radius, spacing } from "../src/theme/theme";
+import { FORM_COLUMN } from "../src/theme/layout";
 
 export default function ImportScreen() {
   const router = useRouter();
@@ -65,7 +66,7 @@ export default function ImportScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing(5) }}>
+      <ScrollView contentContainerStyle={FORM_COLUMN}>
         {!preview ? (
           <>
             <Pressable style={styles.pickBtn} onPress={pick} disabled={busy}>
@@ -204,7 +205,7 @@ const styles = StyleSheet.create({
     textAlign: "center",
     marginTop: spacing(4),
   },
-  card: { backgroundColor: colors.card, borderRadius: radius.md, padding: spacing(4.5), marginBottom: spacing(5) },
+  card: { backgroundColor: colors.card, borderRadius: radius.md, padding: spacing(4.5), marginBottom: spacing(5), ...cardEdge },
   bookTitle: { fontFamily: fonts.display, fontSize: 21, color: colors.ink },
   bookMeta: { fontFamily: fonts.body, fontSize: 13.5, color: colors.inkSoft, marginTop: spacing(1) },
   badges: { flexDirection: "row", gap: spacing(3), marginTop: spacing(3) },
@@ -217,6 +218,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing(3.5),
     backgroundColor: colors.card,
+    ...cardEdge,
     borderRadius: radius.md,
     borderWidth: 1.5,
     borderColor: colors.ruleSoft,

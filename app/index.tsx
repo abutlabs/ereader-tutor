@@ -32,7 +32,8 @@ import Ring from "../src/components/Ring";
 import Flame from "../src/components/Flame";
 import Cover from "../src/components/Cover";
 import ProgressBar from "../src/components/ProgressBar";
-import { colors, fonts, radius, spacing } from "../src/theme/theme";
+import { cardEdge, colors, EINK, fonts, radius, spacing } from "../src/theme/theme";
+import { cellWidth, TOUCH, useLayout } from "../src/theme/layout";
 
 interface BookCard {
   summary: BookSummary;
@@ -71,6 +72,11 @@ async function bookProgress(id: string): Promise<{ learned: number; total: numbe
 export default function LibraryScreen() {
   const router = useRouter();
   const dev = useDevMode();
+  const L = useLayout();
+  const GAP = spacing(3);
+  // Tablets: book cards in a grid; daily goal + continue side by side when wide.
+  const cell = { width: L.gridCols > 1 ? cellWidth(L.columnInner, L.gridCols, GAP) : ("100%" as const) };
+  const topRow = L.tablet && L.landscape;
   const [cards, setCards] = useState<BookCard[]>([]);
   const [store, setStore] = useState<CatalogItem[]>([]);
   const [buying, setBuying] = useState<string | null>(null);
@@ -173,22 +179,26 @@ export default function LibraryScreen() {
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       {/* Greeting header */}
-      <View style={styles.header}>
+      <View style={[styles.header, L.tablet && { width: "100%", maxWidth: L.column.maxWidth, alignSelf: "center" }]}>
         <View style={{ flex: 1 }}>
           <Text style={styles.greeting}>{greeting()}</Text>
           <Text style={styles.h1}>Your library</Text>
         </View>
         <View style={styles.headerActions}>
           {streak > 0 && <Flame n={streak} />}
-          <Pressable onPress={() => router.push("/settings")} hitSlop={10} style={styles.gear}>
+          <Pressable onPress={() => router.push("/notes")} style={styles.gear} accessibilityLabel="Pen notes">
+            <Feather name="edit-3" size={20} color={colors.inkSoft} />
+          </Pressable>
+          <Pressable onPress={() => router.push("/settings")} style={styles.gear} accessibilityLabel="Settings">
             <Feather name="settings" size={21} color={colors.inkSoft} />
           </Pressable>
         </View>
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing(5), paddingTop: spacing(2) }}>
+      <ScrollView contentContainerStyle={[L.column, { paddingTop: spacing(2) }]}>
+        <View style={topRow ? styles.topRow : null}>
         {/* Daily goal card */}
-        <View style={styles.dailyCard}>
+        <View style={[styles.dailyCard, topRow && styles.topCell]}>
           <Ring value={count} total={goal} size={58} stroke={5}>
             <Text style={styles.ringCount}>{count}</Text>
             <Text style={styles.ringGoal}>/ {goal}</Text>
@@ -206,7 +216,7 @@ export default function LibraryScreen() {
         {/* Continue reading hero */}
         {cont && (
           <Pressable
-            style={styles.hero}
+            style={[styles.hero, topRow && styles.topCell]}
             onPress={() => router.push({ pathname: "/reader/[id]", params: { id: cont.id } })}
           >
             <Cover title={cont.title} seed={cont.id} w={66} h={92} radius={8} />
@@ -223,15 +233,17 @@ export default function LibraryScreen() {
             </View>
           </Pressable>
         )}
+        </View>
 
         {/* Your books */}
         <Text style={styles.sectionLabel}>Your books</Text>
+        <View style={styles.grid}>
         {cards.map(({ summary: b, learned, total }) => {
           const pct = total > 0 ? Math.round((learned / total) * 100) : 0;
           return (
             <Pressable
               key={b.id}
-              style={styles.row}
+              style={[styles.row, cell]}
               onPress={() => router.push(`/book/${b.id}`)}
               onLongPress={() => onLongPress(b)}
             >
@@ -250,15 +262,17 @@ export default function LibraryScreen() {
             </Pressable>
           );
         })}
+        </View>
 
         {/* Bookstore — paid books to unlock */}
         {store.length > 0 && (
           <>
             <Text style={styles.sectionLabel}>Bookstore</Text>
+            <View style={styles.grid}>
             {store.map((item) => (
               <Pressable
                 key={item.id}
-                style={styles.storeRow}
+                style={[styles.storeRow, cell]}
                 onPress={() => onBuy(item)}
                 disabled={buying === item.id}
               >
@@ -282,6 +296,7 @@ export default function LibraryScreen() {
                 </View>
               </Pressable>
             ))}
+            </View>
           </>
         )}
 
@@ -350,8 +365,11 @@ const styles = StyleSheet.create({
   },
   greeting: { fontFamily: fonts.ui, fontSize: 13, color: colors.inkFaint, marginBottom: spacing(0.5) },
   h1: { fontFamily: fonts.displayBold, fontSize: 27, letterSpacing: -0.4, color: colors.ink },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing(3) },
-  gear: { padding: spacing(1) },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing(1) },
+  gear: { minWidth: TOUCH, minHeight: TOUCH, alignItems: "center", justifyContent: "center" },
+  grid: { flexDirection: "row", flexWrap: "wrap", columnGap: spacing(3) },
+  topRow: { flexDirection: "row", gap: spacing(4), alignItems: "stretch" },
+  topCell: { flex: 1 },
 
   dailyCard: {
     flexDirection: "row",
@@ -362,6 +380,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing(4),
     paddingHorizontal: spacing(4.5),
     marginBottom: spacing(4),
+    ...cardEdge,
   },
   ringCount: { fontFamily: fonts.displayBold, fontSize: 18, color: colors.ink, lineHeight: 20 },
   ringGoal: { fontFamily: fonts.ui, fontSize: 10.5, color: colors.inkFaint },
@@ -376,10 +395,11 @@ const styles = StyleSheet.create({
     padding: spacing(4),
     marginBottom: spacing(5),
     shadowColor: "#281c11",
-    shadowOpacity: 0.1,
+    shadowOpacity: EINK ? 0 : 0.1,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    elevation: EINK ? 0 : 3,
+    ...cardEdge,
   },
   kicker: {
     fontFamily: fonts.uiSemibold,
@@ -409,6 +429,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing(3.5),
     marginBottom: spacing(3),
+    ...cardEdge,
   },
   rowTitle: { fontFamily: fonts.display, fontSize: 18, color: colors.ink },
   rowAuthor: { fontFamily: fonts.body, fontSize: 13, color: colors.inkSoft, marginTop: spacing(0.5) },
@@ -422,6 +443,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing(3.5),
     marginBottom: spacing(3),
+    ...cardEdge,
   },
   lockWrap: { position: "relative" },
   lockBadge: {
@@ -464,6 +486,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     gap: spacing(2),
+    minHeight: TOUCH,
     paddingVertical: spacing(3),
     marginTop: spacing(2),
   },
@@ -474,6 +497,7 @@ const styles = StyleSheet.create({
     padding: spacing(4),
     gap: spacing(3),
     marginTop: spacing(2),
+    ...cardEdge,
   },
   input: {
     fontFamily: fonts.body,

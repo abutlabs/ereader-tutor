@@ -5,6 +5,7 @@
 import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
+  DevSettings,
   Pressable,
   ScrollView,
   StyleSheet,
@@ -15,6 +16,7 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import Constants from "expo-constants";
+import * as Updates from "expo-updates";
 import { useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import { DEV_AVAILABLE, setDevMode, useDevMode } from "../src/storage/devMode";
@@ -34,7 +36,26 @@ import {
   TranslationSource,
 } from "../src/storage/apiKey";
 import { ClaudeError, pingApiKey, pingBridge } from "../src/api/claude";
-import { colors, fonts, radius, spacing } from "../src/theme/theme";
+import {
+  cardEdge,
+  colors,
+  EINK,
+  einkPref,
+  fonts,
+  isEinkDevice,
+  radius,
+  saveEinkPref,
+  spacing,
+  type EinkPref,
+} from "../src/theme/theme";
+import { FORM_COLUMN } from "../src/theme/layout";
+
+// The palette is fixed when the app starts, so changing it reloads the app.
+function applyEinkPref(pref: EinkPref) {
+  saveEinkPref(pref);
+  if (__DEV__) DevSettings.reload();
+  else Updates.reloadAsync().catch(() => {});
+}
 
 type TestState = { kind: "idle" | "testing" | "ok" | "error"; msg?: string };
 
@@ -134,7 +155,30 @@ export default function SettingsScreen() {
         <View style={{ width: 26 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing(5) }}>
+      <ScrollView contentContainerStyle={FORM_COLUMN}>
+        <Text style={styles.sectionLabel}>Display</Text>
+        <View style={[styles.devRow, { marginTop: 0, marginBottom: spacing(2) }]}>
+          <View style={{ flex: 1, paddingRight: spacing(4) }}>
+            <Text style={styles.modelLabel}>E-ink mode</Text>
+            <Text style={styles.modelCost}>
+              Black on white, no tinted backgrounds, no animations.
+              {einkPref === "auto"
+                ? isEinkDevice()
+                  ? " On automatically for this BOOX device."
+                  : " Automatic: on for Onyx BOOX devices."
+                : " Set by you."}{" "}
+              Changing it restarts the app.
+            </Text>
+          </View>
+          <Switch
+            value={EINK}
+            onValueChange={(v) => applyEinkPref(v === isEinkDevice() ? "auto" : v ? "on" : "off")}
+            trackColor={{ true: colors.accent, false: colors.rule }}
+            thumbColor={colors.paper}
+            accessibilityLabel="E-ink mode"
+          />
+        </View>
+        <View style={{ height: spacing(6) }} />
         {dev && (
         <>
         <Text style={styles.sectionLabel}>Translation source</Text>
@@ -351,6 +395,7 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: colors.ink,
     backgroundColor: colors.paperSoft,
+    ...cardEdge,
     borderRadius: radius.md,
     paddingHorizontal: spacing(4),
     paddingVertical: spacing(3.5),
@@ -372,7 +417,7 @@ const styles = StyleSheet.create({
     padding: spacing(4),
     marginBottom: spacing(2.5),
     borderWidth: 1.5,
-    borderColor: "transparent",
+    borderColor: EINK ? colors.rule : "transparent",
   },
   modelRowOn: { borderColor: colors.accent },
   devRow: {
@@ -382,6 +427,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing(4),
     marginTop: spacing(2),
+    ...cardEdge,
   },
   modelLabel: { fontFamily: fonts.bodyMedium, fontSize: 16, color: colors.ink },
   modelCost: {

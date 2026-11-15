@@ -5,7 +5,10 @@ name: EAS Build (Android)
 #   • every run  → a workflow Artifact (download from the run's summary page)
 #   • tag builds → also attached to the GitHub Release for that tag
 #
-#   profile = preview    → APK (sideloadable beta)
+#   profile = preview    → APK (sideloadable beta)    → Release "Beta (latest)", tag `beta`
+#   profile = boox-beta  → APK from a test branch    → Release "BOOX beta", tag `boox-beta`
+#                          (own EAS channel with no updates, so the APK always runs
+#                          the JS it was built with — never main's preview update)
 #   profile = production → AAB (for the Play Store)
 #
 # NOTE: GitHub *Packages* has no APK package type, so the binary goes to Releases /
@@ -24,6 +27,7 @@ on:
         type: choice
         options:
           - preview
+          - boox-beta
           - production
         default: preview
   push:
@@ -47,7 +51,7 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           cache: npm
 
       - name: Set up EAS
@@ -115,7 +119,8 @@ jobs:
       - name: Publish to GitHub Releases
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'beta' }}
-          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'Beta (latest)' }}
+          tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || (steps.cfg.outputs.profile == 'boox-beta' && 'boox-beta' || 'beta') }}
+          name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || (steps.cfg.outputs.profile == 'boox-beta' && 'BOOX beta' || 'Beta (latest)') }}
+          target_commitish: ${{ github.sha }}
           prerelease: ${{ !startsWith(github.ref, 'refs/tags/') }}
           files: "ereader-tutor-*.${{ steps.cfg.outputs.ext }}"

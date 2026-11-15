@@ -23,6 +23,10 @@
       },
       "channel": "preview"
     },
+    "boox-beta": {
+      "extends": "preview",
+      "channel": "boox-beta"
+    },
     "production": {
       "autoIncrement": true,
       "node": "20.19.4",

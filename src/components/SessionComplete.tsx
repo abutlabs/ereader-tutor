@@ -5,7 +5,7 @@
 import { Modal, Pressable, StyleSheet, Text, View } from "react-native";
 import { MaterialCommunityIcons } from "@expo/vector-icons";
 import Ring from "./Ring";
-import { colors, fonts, radius, spacing } from "../theme/theme";
+import { colors, fonts, motion, radius, spacing } from "../theme/theme";
 
 interface Props {
   visible: boolean;
@@ -16,7 +16,7 @@ interface Props {
 
 export default function SessionComplete({ visible, goal, streak, onClose }: Props) {
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose}>
+    <Modal visible={visible} transparent animationType={motion("fade")} onRequestClose={onClose}>
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <Ring value={1} total={1} size={120} stroke={9} color={colors.gold}>

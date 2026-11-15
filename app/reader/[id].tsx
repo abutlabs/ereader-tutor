@@ -4,6 +4,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { StatusBar } from "expo-status-bar";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { Book, Figure, Sentence } from "../../src/data/schema";
@@ -24,13 +26,19 @@ import { bookChapters } from "../../src/data/chapters";
 import Ring from "../../src/components/Ring";
 import Flame from "../../src/components/Flame";
 import SessionComplete from "../../src/components/SessionComplete";
-import { colors, fonts, radius, spacing } from "../../src/theme/theme";
+import ContentsDrawer from "../../src/components/ContentsDrawer";
+import { useInk } from "../../src/notes/ink";
+import InkTools from "../../src/notes/InkTools";
+import { colors, EINK, fonts, motion, radius, spacing } from "../../src/theme/theme";
+import { TOUCH, useLayout } from "../../src/theme/layout";
 
+const FULL_KEY = "reader:fullscreen"; // remembered across books and launches
 const FOCUS_DIM = 0.32; // opacity of non-active text while a sentence is focused
 
 export default function ReaderScreen() {
   const { id, start } = useLocalSearchParams<{ id: string; start?: string }>();
   const router = useRouter();
+  const L = useLayout();
 
   const [book, setBook] = useState<Book | null>(null);
   const [pageIdx, setPageIdx] = useState(0);
@@ -43,12 +51,22 @@ export default function ReaderScreen() {
   const [zoomed, setZoomed] = useState<string | null>(null); // uri of the image shown full-screen
   const [daily, setDaily] = useState<DailyState | null>(null);
   const [sessionDone, setSessionDone] = useState(false);
+  // Full-screen reading: all chrome hidden; a corner button and a contents
+  // drawer are the only controls, page turns sit at the end of the text.
+  const [full, setFull] = useState(false);
+  const [drawer, setDrawer] = useState(false);
   const hydrated = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     loadDaily().then(setDaily);
+    AsyncStorage.getItem(FULL_KEY).then((v) => setFull(v === "1")).catch(() => {});
   }, []);
+
+  function setFullScreen(on: boolean) {
+    setFull(on);
+    AsyncStorage.setItem(FULL_KEY, on ? "1" : "0").catch(() => {});
+  }
 
   // Load book once; pick the initial page from `start`, else the saved position.
   useEffect(() => {
@@ -73,6 +91,8 @@ export default function ReaderScreen() {
 
   const page = book?.pages[pageIdx] ?? null;
   const lang = book?.meta.language ?? "nl-NL";
+  // Pen notes on this page: the stylus writes, a finger scrolls.
+  const ink = useInk(book?.id, book?.meta.title ?? "", page?.page, colors.ink);
 
   // Subscribe to the shared speech state so highlights reflect what's playing.
   useEffect(() => onSpeakingChange(setSpeakingId), []);
@@ -118,7 +138,7 @@ export default function ReaderScreen() {
   }, [page]);
   const renderFigures = (k: number) =>
     (figuresAfter.get(k) ?? []).map((f) => (
-      <Pressable key={f.uri} onPress={() => setZoomed(f.uri)} accessibilityLabel="Show the illustration full-screen">
+      <Pressable key={f.uri} onPress={() => !ink.swallowPress() && setZoomed(f.uri)} accessibilityLabel="Show the illustration full-screen">
         <Image
           source={{ uri: f.uri }}
           style={[styles.figure, { aspectRatio: f.width && f.height ? f.width / f.height : 4 / 3 }, focusing && styles.dim]}
@@ -189,13 +209,49 @@ export default function ReaderScreen() {
   const total = book.pages.length;
   const focusing = active != null;
 
+  // Type scales up on tablets; the text column is capped at ~40em and centered.
+  // Landscape on a wide screen puts the page art beside the text.
+  const bodySize = Math.round(19 * L.type);
+  const typeStyles = {
+    paragraph: { fontSize: bodySize, lineHeight: Math.round(32 * L.type) },
+    dropCap: { fontSize: Math.round(40 * L.type), lineHeight: Math.round(40 * L.type) },
+    chapterTitle: { fontSize: Math.round(24 * L.type), lineHeight: Math.round(30 * L.type) },
+    preamble: { fontSize: Math.round(16 * L.type), lineHeight: Math.round(26 * L.type) },
+  };
+  const textColumn = { width: "100%" as const, maxWidth: bodySize * 40, alignSelf: "center" as const };
+  const split = L.wide && L.landscape && !!page.imageUri && !pictureOnly;
+  const pageArt = page.imageUri ? (
+    <Pressable
+      onPress={() => !ink.swallowPress() && setZoomed(page.imageUri!)}
+      accessibilityLabel="Show the page photo full-screen"
+      style={split ? [styles.splitArt, full && styles.pageFull] : undefined}
+    >
+      <Image
+        source={{ uri: page.imageUri }}
+        style={[
+          split
+            ? styles.splitImage
+            : pictureOnly
+              ? [styles.pageImageFull, { aspectRatio: imageRatio ?? 0.75 }]
+              : [styles.pageImage, { height: Math.min(240 * L.type, L.height * 0.3) }],
+          focusing && styles.dim,
+        ]}
+        resizeMode={split || pictureOnly ? "contain" : "cover"}
+      />
+    </Pressable>
+  ) : null;
+
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+      <StatusBar hidden={full} />
+      {full ? null : (
+      <>
       <ReaderHeader
         title={book.meta.title}
         subtitle={`${page.title ? page.title + " · " : ""}p.${page.page}`}
         onBack={() => router.back()}
         onContents={() => router.push({ pathname: "/contents/[id]", params: { id: id! } })}
+        onFullScreen={() => setFullScreen(true)}
         daily={daily}
       />
 
@@ -223,37 +279,38 @@ export default function ReaderScreen() {
         onPrev={() => goTo(pageIdx - 1)}
         onNext={() => goTo(pageIdx + 1)}
       />
+      </>
+      )}
 
+      <View style={split ? styles.splitRow : styles.flex}>
+      {split ? pageArt : null}
       <ScrollView
         ref={scrollRef}
-        contentContainerStyle={styles.page}
+        style={styles.flex}
+        contentContainerStyle={[styles.page, full && styles.pageFull]}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={ink.scrollEnabled}
       >
-        {page.imageUri ? (
-          <Pressable onPress={() => setZoomed(page.imageUri!)} accessibilityLabel="Show the page photo full-screen">
-            <Image
-              source={{ uri: page.imageUri }}
-              style={[
-                pictureOnly
-                  ? [styles.pageImageFull, { aspectRatio: imageRatio ?? 0.75 }]
-                  : styles.pageImage,
-                focusing && styles.dim,
-              ]}
-              resizeMode={pictureOnly ? "contain" : "cover"}
-            />
-          </Pressable>
-        ) : null}
+        <View ref={ink.columnRef} style={textColumn} {...ink.handlers}>
+        {split ? null : pageArt}
         {page.title ? (
-          <Text style={[styles.chapterTitle, focusing && styles.dim]}>{page.title}</Text>
+          <Text style={[styles.chapterTitle, typeStyles.chapterTitle, focusing && styles.dim]}>{page.title}</Text>
         ) : null}
         {page.preamble ? (
-          <Text style={[styles.preamble, focusing && styles.dim]}>{page.preamble}</Text>
+          <Text style={[styles.preamble, typeStyles.preamble, focusing && styles.dim]}>{page.preamble}</Text>
         ) : null}
         {renderFigures(0)}
 
         {page.paragraphs.map((para, pi) => (
-          <View key={pi}>
-          <Text style={styles.paragraph}>
+          <View key={pi} onLayout={ink.paragraphLayout(pi)}>
+          <Text
+            style={[styles.paragraph, typeStyles.paragraph]}
+            onTextLayout={ink.paragraphLines(
+              pi,
+              // Characters each sentence contributes: text + space (+ "✓ ").
+              para.map((s) => ({ id: s.id, len: s.dutch.length + 1 + (learned.has(s.id) ? 2 : 0) })),
+            )}
+          >
             {para.map((s, si) => {
               const isActive = active?.id === s.id;
               const isLearned = learned.has(s.id);
@@ -264,7 +321,7 @@ export default function ReaderScreen() {
                 return (
                   <Text
                     key={s.id}
-                    onPress={() => setActive(s)}
+                    onPress={() => !ink.swallowPress() && setActive(s)}
                     style={[
                       styles.sentence,
                       isLearned && styles.sentenceLearned,
@@ -272,7 +329,7 @@ export default function ReaderScreen() {
                       isActive && styles.sentenceActive,
                     ]}
                   >
-                    <Text style={styles.dropCap}>{first}</Text>
+                    <Text style={[styles.dropCap, typeStyles.dropCap]}>{first}</Text>
                     {rest + " "}
                     {isLearned ? <Text style={styles.learnedCheck}>{"✓ "}</Text> : null}
                   </Text>
@@ -281,7 +338,7 @@ export default function ReaderScreen() {
               return (
                 <Text
                   key={s.id}
-                  onPress={() => setActive(s)}
+                  onPress={() => !ink.swallowPress() && setActive(s)}
                   style={[
                     styles.sentence,
                     isLearned && styles.sentenceLearned,
@@ -303,20 +360,64 @@ export default function ReaderScreen() {
         <Text style={styles.pageFooter}>
           {pageIdx === total - 1 ? "End of book so far" : `Page ${pageIdx + 1}`}
         </Text>
+        {full ? (
+          <PageNav
+            idx={pageIdx}
+            total={total}
+            onPrev={() => goTo(pageIdx - 1)}
+            onNext={() => goTo(pageIdx + 1)}
+          />
+        ) : null}
+        {ink.canvas}
+        </View>
       </ScrollView>
+      <InkTools ink={ink} onNotes={() => router.push("/notes")} />
+      </View>
 
       {/* Bottom page nav */}
-      <PageNav
-        idx={pageIdx}
-        total={total}
-        onPrev={() => goTo(pageIdx - 1)}
-        onNext={() => goTo(pageIdx + 1)}
-        filled
+      {full ? null : (
+        <PageNav
+          idx={pageIdx}
+          total={total}
+          onPrev={() => goTo(pageIdx - 1)}
+          onNext={() => goTo(pageIdx + 1)}
+          filled
+        />
+      )}
+
+      {/* Full-screen corner controls: contents drawer (left), exit (right). */}
+      {full ? (
+        <>
+          <Pressable
+            style={[styles.cornerBtn, styles.cornerLeft]}
+            onPress={() => setDrawer(true)}
+            accessibilityLabel="Contents"
+          >
+            <Feather name="menu" size={20} color={colors.inkSoft} />
+          </Pressable>
+          <Pressable
+            style={[styles.cornerBtn, styles.cornerRight]}
+            onPress={() => setFullScreen(false)}
+            accessibilityLabel="Exit full screen"
+          >
+            <Feather name="minimize-2" size={20} color={colors.inkSoft} />
+          </Pressable>
+        </>
+      ) : null}
+
+      <ContentsDrawer
+        visible={drawer}
+        book={book}
+        pageIdx={pageIdx}
+        onJump={goTo}
+        onFullContents={() => router.push({ pathname: "/contents/[id]", params: { id: id! } })}
+        onExitFullScreen={() => setFullScreen(false)}
+        onClose={() => setDrawer(false)}
       />
 
       {/* Full-screen image — a page photo or an illustration, to find your place in the physical book. */}
 
-      <Modal visible={!!zoomed} transparent animationType="fade" onRequestClose={() => setZoomed(null)}>
+      <Modal visible={!!zoomed} transparent animationType={motion("fade")} onRequestClose={() => setZoomed(null)}>
 
         <Pressable style={styles.zoomBackdrop} onPress={() => setZoomed(null)}>
 
@@ -365,21 +466,23 @@ function ReaderHeader({
   subtitle,
   onBack,
   onContents,
+  onFullScreen,
   daily,
 }: {
   title: string;
   subtitle?: string;
   onBack: () => void;
   onContents?: () => void;
+  onFullScreen?: () => void;
   daily: DailyState | null;
 }) {
   return (
     <View style={styles.header}>
-      <Pressable onPress={onBack} hitSlop={10} style={{ marginRight: spacing(1) }}>
+      <Pressable onPress={onBack} style={styles.headerBtn} accessibilityLabel="Back">
         <Feather name="chevron-left" size={24} color={colors.ink} />
       </Pressable>
       {onContents ? (
-        <Pressable onPress={onContents} hitSlop={10} style={{ marginRight: spacing(2) }} accessibilityLabel="Table of contents">
+        <Pressable onPress={onContents} style={styles.headerBtn} accessibilityLabel="Table of contents">
           <Feather name="list" size={22} color={colors.accent} />
         </Pressable>
       ) : null}
@@ -401,6 +504,11 @@ function ReaderHeader({
           {daily.streak > 0 && <Flame n={daily.streak} soft />}
         </View>
       )}
+      {onFullScreen ? (
+        <Pressable onPress={onFullScreen} style={styles.headerBtn} accessibilityLabel="Full screen">
+          <Feather name="maximize-2" size={20} color={colors.inkSoft} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -485,14 +593,40 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing(2),
-    paddingHorizontal: spacing(4),
-    paddingVertical: spacing(2.5),
+    paddingHorizontal: spacing(2),
+    paddingVertical: spacing(1),
     backgroundColor: colors.paperWarm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.ruleSoft,
   },
   headerTitle: { fontFamily: fonts.display, fontSize: 15.5, color: colors.ink },
   headerSub: { fontFamily: fonts.ui, fontSize: 11, color: colors.inkFaint, marginTop: 1 },
+  headerBtn: { minWidth: TOUCH, minHeight: TOUCH, alignItems: "center", justifyContent: "center" },
+  flex: { flex: 1 },
+  cornerBtn: {
+    position: "absolute",
+    top: spacing(2),
+    width: TOUCH,
+    height: TOUCH,
+    borderRadius: TOUCH / 2,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.paper,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.rule,
+    opacity: 0.85,
+  },
+  pageFull: { paddingTop: TOUCH + spacing(4) },
+  cornerLeft: { left: spacing(2) },
+  cornerRight: { right: spacing(2) },
+  splitRow: { flex: 1, flexDirection: "row" },
+  splitArt: {
+    flex: 1,
+    padding: spacing(4),
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: colors.ruleSoft,
+  },
+  splitImage: { width: "100%", height: "100%" },
   headerRight: { flexDirection: "row", alignItems: "center", gap: spacing(2) },
   headerRingCount: { fontFamily: fonts.uiBold, fontSize: 11, color: colors.ink },
   navRow: {
@@ -500,14 +634,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing(5),
-    paddingVertical: spacing(2.5),
+    paddingVertical: spacing(1.5),
   },
   navBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing(1),
+    minHeight: TOUCH,
     paddingVertical: spacing(2),
-    paddingHorizontal: spacing(4),
+    paddingHorizontal: spacing(5),
     borderRadius: radius.pill,
     borderWidth: 1.5,
     borderColor: colors.accent,
@@ -535,6 +670,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing(2),
     alignSelf: "center",
+    minHeight: TOUCH,
     paddingHorizontal: spacing(3),
     paddingVertical: spacing(1),
   },
@@ -588,7 +724,7 @@ const styles = StyleSheet.create({
     textDecorationColor: colors.accent,
   },
   sentenceLearned: { color: colors.inkSoft },
-  dim: { opacity: 0.32 },
+  dim: { opacity: EINK ? 0.45 : 0.32 },
   learnedCheck: { color: colors.good, fontFamily: fonts.uiRegular, fontSize: 14 },
   dropCap: {
     fontFamily: fonts.displayBold,

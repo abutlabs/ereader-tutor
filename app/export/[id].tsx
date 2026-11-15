@@ -16,7 +16,8 @@ import {
   sharePackage,
   type ExportFlags,
 } from "../../src/transfer/package";
-import { colors, fonts, radius, spacing } from "../../src/theme/theme";
+import { cardEdge, colors, fonts, radius, spacing } from "../../src/theme/theme";
+import { FORM_COLUMN } from "../../src/theme/layout";
 
 const PRESETS: Record<string, ExportFlags> = {
   full: { photos: true, progress: true, wordlist: true },
@@ -67,7 +68,7 @@ export default function ExportScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing(5) }}>
+      <ScrollView contentContainerStyle={FORM_COLUMN}>
         {book && (
           <View style={styles.summary}>
             <Cover title={book.meta.title} seed={book.id} w={48} h={68} radius={6} fontSize={11} />
@@ -154,6 +155,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing(3.5),
     backgroundColor: colors.card,
+    ...cardEdge,
     borderRadius: radius.md,
     padding: spacing(3.5),
     marginBottom: spacing(5),

@@ -13,7 +13,8 @@ import {
 import { Feather } from "@expo/vector-icons";
 import type { Sentence } from "../data/schema";
 import { normWord } from "../storage/wordlist";
-import { colors, fonts, radius, spacing } from "../theme/theme";
+import { cardEdge, colors, fonts, motion, radius, spacing } from "../theme/theme";
+import { TOUCH, useLayout } from "../theme/layout";
 
 interface Props {
   sentence: Sentence | null;
@@ -43,16 +44,24 @@ export default function SentenceSheet({
   onClose,
 }: Props) {
   const visible = !!sentence;
+  const L = useLayout();
+  const t = (n: number) => Math.round(n * L.type);
+  // Tablets: a centered sheet (not edge to edge) with larger type.
+  const sheetSize = L.tablet
+    ? { width: "100%" as const, maxWidth: 820, alignSelf: "center" as const, maxHeight: L.landscape ? ("90%" as const) : ("70%" as const) }
+    : L.landscape
+      ? { maxHeight: "92%" as const }
+      : null;
 
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType={motion("slide")}
       transparent
       onRequestClose={onClose}
     >
       <Pressable style={styles.scrim} onPress={onClose} />
-      <View style={styles.sheet}>
+      <View style={[styles.sheet, sheetSize]}>
         <View style={styles.grabber} />
 
         {sentence && (
@@ -72,8 +81,8 @@ export default function SentenceSheet({
                   Slow
                 </Text>
               </Pressable>
-              <Pressable onPress={onClose} hitSlop={10}>
-                <Feather name="x" size={22} color={colors.inkSoft} />
+              <Pressable onPress={onClose} style={styles.closeBtn} accessibilityLabel="Close">
+                <Feather name="x" size={22 * L.type} color={colors.inkSoft} />
               </Pressable>
             </View>
 
@@ -86,7 +95,7 @@ export default function SentenceSheet({
                 style={styles.dutchRow}
                 onPress={() => onSpeak(sentence.dutch, "sentence")}
               >
-                <Text style={styles.dutch}>{sentence.dutch}</Text>
+                <Text style={[styles.dutch, { fontSize: t(23), lineHeight: t(32) }]}>{sentence.dutch}</Text>
                 <View
                   style={[
                     styles.speakBtn,
@@ -103,7 +112,7 @@ export default function SentenceSheet({
                 </View>
               </Pressable>
 
-              <Text style={styles.english}>{sentence.english}</Text>
+              <Text style={[styles.english, { fontSize: t(17), lineHeight: t(26) }]}>{sentence.english}</Text>
 
               {/* Word by word */}
               {sentence.words.length > 0 && (
@@ -120,8 +129,8 @@ export default function SentenceSheet({
                           style={[styles.wordRow, playing && styles.wordRowActive]}
                         >
                           <Pressable style={styles.wordTap} onPress={() => onSpeak(w.nl, id)}>
-                            <Text style={styles.wordNl}>{w.nl}</Text>
-                            <Text style={styles.wordEn}>{w.en}</Text>
+                            <Text style={[styles.wordNl, { fontSize: t(16) }]}>{w.nl}</Text>
+                            <Text style={[styles.wordEn, { fontSize: t(15) }]}>{w.en}</Text>
                             <Feather
                               name="volume-2"
                               size={14}
@@ -152,8 +161,8 @@ export default function SentenceSheet({
                   <Text style={styles.sectionLabel}>Grammar notes</Text>
                   {sentence.notes.map((n, i) => (
                     <View key={i} style={styles.note}>
-                      <Text style={styles.noteTitle}>{n.title}</Text>
-                      <Text style={styles.noteBody}>{n.body}</Text>
+                      <Text style={[styles.noteTitle, { fontSize: t(15) }]}>{n.title}</Text>
+                      <Text style={[styles.noteBody, { fontSize: t(15), lineHeight: t(22) }]}>{n.body}</Text>
                     </View>
                   ))}
                 </>
@@ -205,7 +214,9 @@ const styles = StyleSheet.create({
     alignItems: "center",
     marginBottom: spacing(3),
   },
+  closeBtn: { minWidth: TOUCH, minHeight: TOUCH, alignItems: "center", justifyContent: "center" },
   slowToggle: {
+    minHeight: TOUCH - 8,
     flexDirection: "row",
     alignItems: "center",
     gap: spacing(1.5),
@@ -232,8 +243,8 @@ const styles = StyleSheet.create({
     color: colors.ink,
   },
   speakBtn: {
-    width: 44,
-    height: 44,
+    width: TOUCH,
+    height: TOUCH,
     borderRadius: radius.pill,
     borderWidth: 1.5,
     borderColor: colors.accent,
@@ -270,9 +281,10 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing(2),
+    minHeight: TOUCH,
     paddingVertical: spacing(2.5),
   },
-  bookmarkBtn: { paddingVertical: spacing(2.5), paddingLeft: spacing(3) },
+  bookmarkBtn: { minWidth: TOUCH, minHeight: TOUCH, alignItems: "center", justifyContent: "center" },
   wordRowActive: { backgroundColor: colors.accentSoft },
   wordNl: {
     fontFamily: fonts.bodyMedium,
@@ -288,6 +300,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing(2.5),
     borderLeftWidth: 3,
     borderLeftColor: colors.accent,
+    ...cardEdge,
   },
   noteTitle: {
     fontFamily: fonts.bodyMedium,
