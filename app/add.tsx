@@ -17,6 +17,7 @@ import { getApiKey, getModel } from "../src/storage/apiKey";
 import { textToLesson, lessonToParagraphs } from "../src/api/claude";
 import { languageName } from "../src/data/languages";
 import { colors, fonts, radius, spacing } from "../src/theme/theme";
+import { FORM_COLUMN } from "../src/theme/layout";
 
 const LANGS = [
   { name: "Dutch", code: "nl" },
@@ -131,7 +132,7 @@ export default function AddBookScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing(5) }}>
+      <ScrollView contentContainerStyle={FORM_COLUMN}>
         {phase === "pick" && (
           <>
             <Pressable style={styles.pickBtn} onPress={pick} disabled={busy}>

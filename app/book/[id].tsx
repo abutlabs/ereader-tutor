@@ -29,6 +29,7 @@ import NumberPrompt from "../../src/components/NumberPrompt";
 import { loadWordlist } from "../../src/storage/wordlist";
 import { useDevMode } from "../../src/storage/devMode";
 import { colors, fonts, radius, spacing } from "../../src/theme/theme";
+import { cellWidth, FORM_COLUMN, useLayout } from "../../src/theme/layout";
 
 interface Pending {
   asset: { uri: string; width?: number; height?: number };
@@ -39,6 +40,7 @@ interface Pending {
 export default function BookScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const router = useRouter();
+  const L = useLayout();
   const dev = useDevMode();
   const [book, setBook] = useState<Book | null>(null);
   const [scan, setScan] = useState<ScanPhase | null>(null);
@@ -210,6 +212,11 @@ export default function BookScreen() {
   const resume = () => router.push({ pathname: "/reader/[id]", params: { id: book.id } });
 
   const isComplete = (book.meta.status ?? "open") === "complete";
+  // Tablets in landscape: chapters in two columns.
+  const chapterCols = L.tablet && L.landscape ? 2 : 1;
+  const chapterCell = {
+    width: chapterCols > 1 ? cellWidth(Math.min(L.width, 820) - 40, 2, spacing(6)) : ("100%" as const),
+  };
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
@@ -219,7 +226,7 @@ export default function BookScreen() {
         onEdit={dev ? () => router.push(`/edit/${book.id}`) : undefined}
         onExport={dev ? () => router.push(`/export/${book.id}`) : undefined}
       />
-      <ScrollView contentContainerStyle={{ padding: spacing(5) }}>
+      <ScrollView contentContainerStyle={FORM_COLUMN}>
         <Text style={styles.kicker}>{book.meta.author}</Text>
         <Text style={styles.title}>{book.meta.title}</Text>
 
@@ -283,12 +290,13 @@ export default function BookScreen() {
         {chapters.length > 0 && (
           <>
             <Text style={styles.sectionLabel}>Chapters</Text>
+            <View style={styles.chapterGrid}>
             {chapters.map((ch) => (
               <Pressable
                 key={ch.number}
                 disabled={!ch.available}
                 onPress={() => ch.available && open(ch.firstIdx)}
-                style={[styles.chapterRow, !ch.available && { opacity: 0.4 }]}
+                style={[styles.chapterRow, chapterCell, !ch.available && { opacity: 0.4 }]}
               >
                 <Text style={styles.chapterNum}>{ch.number}</Text>
                 <Text style={styles.chapterTitle} numberOfLines={2}>
@@ -299,6 +307,7 @@ export default function BookScreen() {
                 </Text>
               </Pressable>
             ))}
+            </View>
           </>
         )}
       </ScrollView>
@@ -370,6 +379,7 @@ function Header({
 }
 
 const styles = StyleSheet.create({
+  chapterGrid: { flexDirection: "row", flexWrap: "wrap", columnGap: spacing(6) },
   safe: { flex: 1, backgroundColor: colors.paper },
   header: {
     flexDirection: "row",
@@ -474,6 +484,7 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing(3),
+    minHeight: 48,
     paddingVertical: spacing(3),
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.rule,

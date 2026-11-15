@@ -25,12 +25,14 @@ import Ring from "../../src/components/Ring";
 import Flame from "../../src/components/Flame";
 import SessionComplete from "../../src/components/SessionComplete";
 import { colors, fonts, radius, spacing } from "../../src/theme/theme";
+import { TOUCH, useLayout } from "../../src/theme/layout";
 
 const FOCUS_DIM = 0.32; // opacity of non-active text while a sentence is focused
 
 export default function ReaderScreen() {
   const { id, start } = useLocalSearchParams<{ id: string; start?: string }>();
   const router = useRouter();
+  const L = useLayout();
 
   const [book, setBook] = useState<Book | null>(null);
   const [pageIdx, setPageIdx] = useState(0);
@@ -189,6 +191,38 @@ export default function ReaderScreen() {
   const total = book.pages.length;
   const focusing = active != null;
 
+  // Type scales up on tablets; the text column is capped at ~40em and centered.
+  // Landscape on a wide screen puts the page art beside the text.
+  const bodySize = Math.round(19 * L.type);
+  const typeStyles = {
+    paragraph: { fontSize: bodySize, lineHeight: Math.round(32 * L.type) },
+    dropCap: { fontSize: Math.round(40 * L.type), lineHeight: Math.round(40 * L.type) },
+    chapterTitle: { fontSize: Math.round(24 * L.type), lineHeight: Math.round(30 * L.type) },
+    preamble: { fontSize: Math.round(16 * L.type), lineHeight: Math.round(26 * L.type) },
+  };
+  const textColumn = { width: "100%" as const, maxWidth: bodySize * 40, alignSelf: "center" as const };
+  const split = L.wide && L.landscape && !!page.imageUri && !pictureOnly;
+  const pageArt = page.imageUri ? (
+    <Pressable
+      onPress={() => setZoomed(page.imageUri!)}
+      accessibilityLabel="Show the page photo full-screen"
+      style={split ? styles.splitArt : undefined}
+    >
+      <Image
+        source={{ uri: page.imageUri }}
+        style={[
+          split
+            ? styles.splitImage
+            : pictureOnly
+              ? [styles.pageImageFull, { aspectRatio: imageRatio ?? 0.75 }]
+              : [styles.pageImage, { height: Math.min(240 * L.type, L.height * 0.3) }],
+          focusing && styles.dim,
+        ]}
+        resizeMode={split || pictureOnly ? "contain" : "cover"}
+      />
+    </Pressable>
+  ) : null;
+
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
       <ReaderHeader
@@ -224,36 +258,27 @@ export default function ReaderScreen() {
         onNext={() => goTo(pageIdx + 1)}
       />
 
+      <View style={split ? styles.splitRow : styles.flex}>
+      {split ? pageArt : null}
       <ScrollView
         ref={scrollRef}
+        style={styles.flex}
         contentContainerStyle={styles.page}
         showsVerticalScrollIndicator={false}
       >
-        {page.imageUri ? (
-          <Pressable onPress={() => setZoomed(page.imageUri!)} accessibilityLabel="Show the page photo full-screen">
-            <Image
-              source={{ uri: page.imageUri }}
-              style={[
-                pictureOnly
-                  ? [styles.pageImageFull, { aspectRatio: imageRatio ?? 0.75 }]
-                  : styles.pageImage,
-                focusing && styles.dim,
-              ]}
-              resizeMode={pictureOnly ? "contain" : "cover"}
-            />
-          </Pressable>
-        ) : null}
+        <View style={textColumn}>
+        {split ? null : pageArt}
         {page.title ? (
-          <Text style={[styles.chapterTitle, focusing && styles.dim]}>{page.title}</Text>
+          <Text style={[styles.chapterTitle, typeStyles.chapterTitle, focusing && styles.dim]}>{page.title}</Text>
         ) : null}
         {page.preamble ? (
-          <Text style={[styles.preamble, focusing && styles.dim]}>{page.preamble}</Text>
+          <Text style={[styles.preamble, typeStyles.preamble, focusing && styles.dim]}>{page.preamble}</Text>
         ) : null}
         {renderFigures(0)}
 
         {page.paragraphs.map((para, pi) => (
           <View key={pi}>
-          <Text style={styles.paragraph}>
+          <Text style={[styles.paragraph, typeStyles.paragraph]}>
             {para.map((s, si) => {
               const isActive = active?.id === s.id;
               const isLearned = learned.has(s.id);
@@ -272,7 +297,7 @@ export default function ReaderScreen() {
                       isActive && styles.sentenceActive,
                     ]}
                   >
-                    <Text style={styles.dropCap}>{first}</Text>
+                    <Text style={[styles.dropCap, typeStyles.dropCap]}>{first}</Text>
                     {rest + " "}
                     {isLearned ? <Text style={styles.learnedCheck}>{"✓ "}</Text> : null}
                   </Text>
@@ -303,7 +328,9 @@ export default function ReaderScreen() {
         <Text style={styles.pageFooter}>
           {pageIdx === total - 1 ? "End of book so far" : `Page ${pageIdx + 1}`}
         </Text>
+        </View>
       </ScrollView>
+      </View>
 
       {/* Bottom page nav */}
       <PageNav
@@ -375,11 +402,11 @@ function ReaderHeader({
 }) {
   return (
     <View style={styles.header}>
-      <Pressable onPress={onBack} hitSlop={10} style={{ marginRight: spacing(1) }}>
+      <Pressable onPress={onBack} style={styles.headerBtn} accessibilityLabel="Back">
         <Feather name="chevron-left" size={24} color={colors.ink} />
       </Pressable>
       {onContents ? (
-        <Pressable onPress={onContents} hitSlop={10} style={{ marginRight: spacing(2) }} accessibilityLabel="Table of contents">
+        <Pressable onPress={onContents} style={styles.headerBtn} accessibilityLabel="Table of contents">
           <Feather name="list" size={22} color={colors.accent} />
         </Pressable>
       ) : null}
@@ -485,14 +512,24 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     gap: spacing(2),
-    paddingHorizontal: spacing(4),
-    paddingVertical: spacing(2.5),
+    paddingHorizontal: spacing(2),
+    paddingVertical: spacing(1),
     backgroundColor: colors.paperWarm,
     borderBottomWidth: StyleSheet.hairlineWidth,
     borderBottomColor: colors.ruleSoft,
   },
   headerTitle: { fontFamily: fonts.display, fontSize: 15.5, color: colors.ink },
   headerSub: { fontFamily: fonts.ui, fontSize: 11, color: colors.inkFaint, marginTop: 1 },
+  headerBtn: { minWidth: TOUCH, minHeight: TOUCH, alignItems: "center", justifyContent: "center" },
+  flex: { flex: 1 },
+  splitRow: { flex: 1, flexDirection: "row" },
+  splitArt: {
+    flex: 1,
+    padding: spacing(4),
+    borderRightWidth: StyleSheet.hairlineWidth,
+    borderRightColor: colors.ruleSoft,
+  },
+  splitImage: { width: "100%", height: "100%" },
   headerRight: { flexDirection: "row", alignItems: "center", gap: spacing(2) },
   headerRingCount: { fontFamily: fonts.uiBold, fontSize: 11, color: colors.ink },
   navRow: {
@@ -500,14 +537,15 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "space-between",
     paddingHorizontal: spacing(5),
-    paddingVertical: spacing(2.5),
+    paddingVertical: spacing(1.5),
   },
   navBtn: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing(1),
+    minHeight: TOUCH,
     paddingVertical: spacing(2),
-    paddingHorizontal: spacing(4),
+    paddingHorizontal: spacing(5),
     borderRadius: radius.pill,
     borderWidth: 1.5,
     borderColor: colors.accent,
@@ -535,6 +573,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing(2),
     alignSelf: "center",
+    minHeight: TOUCH,
     paddingHorizontal: spacing(3),
     paddingVertical: spacing(1),
   },

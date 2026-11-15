@@ -35,6 +35,7 @@ import {
 } from "../src/storage/apiKey";
 import { ClaudeError, pingApiKey, pingBridge } from "../src/api/claude";
 import { colors, fonts, radius, spacing } from "../src/theme/theme";
+import { FORM_COLUMN } from "../src/theme/layout";
 
 type TestState = { kind: "idle" | "testing" | "ok" | "error"; msg?: string };
 
@@ -134,7 +135,7 @@ export default function SettingsScreen() {
         <View style={{ width: 26 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing(5) }}>
+      <ScrollView contentContainerStyle={FORM_COLUMN}>
         {dev && (
         <>
         <Text style={styles.sectionLabel}>Translation source</Text>

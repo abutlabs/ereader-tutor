@@ -14,6 +14,7 @@ import {
   type PackagePreview,
 } from "../src/transfer/package";
 import { colors, fonts, radius, spacing } from "../src/theme/theme";
+import { FORM_COLUMN } from "../src/theme/layout";
 
 export default function ImportScreen() {
   const router = useRouter();
@@ -65,7 +66,7 @@ export default function ImportScreen() {
         <View style={{ width: 24 }} />
       </View>
 
-      <ScrollView contentContainerStyle={{ padding: spacing(5) }}>
+      <ScrollView contentContainerStyle={FORM_COLUMN}>
         {!preview ? (
           <>
             <Pressable style={styles.pickBtn} onPress={pick} disabled={busy}>
