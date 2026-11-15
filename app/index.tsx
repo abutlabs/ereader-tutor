@@ -186,6 +186,9 @@ export default function LibraryScreen() {
         </View>
         <View style={styles.headerActions}>
           {streak > 0 && <Flame n={streak} />}
+          <Pressable onPress={() => router.push("/notes")} style={styles.gear} accessibilityLabel="Pen notes">
+            <Feather name="edit-3" size={20} color={colors.inkSoft} />
+          </Pressable>
           <Pressable onPress={() => router.push("/settings")} style={styles.gear} accessibilityLabel="Settings">
             <Feather name="settings" size={21} color={colors.inkSoft} />
           </Pressable>
@@ -362,7 +365,7 @@ const styles = StyleSheet.create({
   },
   greeting: { fontFamily: fonts.ui, fontSize: 13, color: colors.inkFaint, marginBottom: spacing(0.5) },
   h1: { fontFamily: fonts.displayBold, fontSize: 27, letterSpacing: -0.4, color: colors.ink },
-  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing(3) },
+  headerActions: { flexDirection: "row", alignItems: "center", gap: spacing(1) },
   gear: { minWidth: TOUCH, minHeight: TOUCH, alignItems: "center", justifyContent: "center" },
   grid: { flexDirection: "row", flexWrap: "wrap", columnGap: spacing(3) },
   topRow: { flexDirection: "row", gap: spacing(4), alignItems: "stretch" },

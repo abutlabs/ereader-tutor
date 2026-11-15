@@ -27,6 +27,8 @@ import Ring from "../../src/components/Ring";
 import Flame from "../../src/components/Flame";
 import SessionComplete from "../../src/components/SessionComplete";
 import ContentsDrawer from "../../src/components/ContentsDrawer";
+import { useInk } from "../../src/notes/ink";
+import InkTools from "../../src/notes/InkTools";
 import { colors, EINK, fonts, motion, radius, spacing } from "../../src/theme/theme";
 import { TOUCH, useLayout } from "../../src/theme/layout";
 
@@ -89,6 +91,8 @@ export default function ReaderScreen() {
 
   const page = book?.pages[pageIdx] ?? null;
   const lang = book?.meta.language ?? "nl-NL";
+  // Pen notes on this page: the stylus writes, a finger scrolls.
+  const ink = useInk(book?.id, book?.meta.title ?? "", page?.page, colors.ink);
 
   // Subscribe to the shared speech state so highlights reflect what's playing.
   useEffect(() => onSpeakingChange(setSpeakingId), []);
@@ -134,7 +138,7 @@ export default function ReaderScreen() {
   }, [page]);
   const renderFigures = (k: number) =>
     (figuresAfter.get(k) ?? []).map((f) => (
-      <Pressable key={f.uri} onPress={() => setZoomed(f.uri)} accessibilityLabel="Show the illustration full-screen">
+      <Pressable key={f.uri} onPress={() => !ink.swallowPress() && setZoomed(f.uri)} accessibilityLabel="Show the illustration full-screen">
         <Image
           source={{ uri: f.uri }}
           style={[styles.figure, { aspectRatio: f.width && f.height ? f.width / f.height : 4 / 3 }, focusing && styles.dim]}
@@ -218,7 +222,7 @@ export default function ReaderScreen() {
   const split = L.wide && L.landscape && !!page.imageUri && !pictureOnly;
   const pageArt = page.imageUri ? (
     <Pressable
-      onPress={() => setZoomed(page.imageUri!)}
+      onPress={() => !ink.swallowPress() && setZoomed(page.imageUri!)}
       accessibilityLabel="Show the page photo full-screen"
       style={split ? [styles.splitArt, full && styles.pageFull] : undefined}
     >
@@ -285,8 +289,9 @@ export default function ReaderScreen() {
         style={styles.flex}
         contentContainerStyle={[styles.page, full && styles.pageFull]}
         showsVerticalScrollIndicator={false}
+        scrollEnabled={ink.scrollEnabled}
       >
-        <View style={textColumn}>
+        <View ref={ink.columnRef} style={textColumn} {...ink.handlers}>
         {split ? null : pageArt}
         {page.title ? (
           <Text style={[styles.chapterTitle, typeStyles.chapterTitle, focusing && styles.dim]}>{page.title}</Text>
@@ -297,8 +302,15 @@ export default function ReaderScreen() {
         {renderFigures(0)}
 
         {page.paragraphs.map((para, pi) => (
-          <View key={pi}>
-          <Text style={[styles.paragraph, typeStyles.paragraph]}>
+          <View key={pi} onLayout={ink.paragraphLayout(pi)}>
+          <Text
+            style={[styles.paragraph, typeStyles.paragraph]}
+            onTextLayout={ink.paragraphLines(
+              pi,
+              // Characters each sentence contributes: text + space (+ "✓ ").
+              para.map((s) => ({ id: s.id, len: s.dutch.length + 1 + (learned.has(s.id) ? 2 : 0) })),
+            )}
+          >
             {para.map((s, si) => {
               const isActive = active?.id === s.id;
               const isLearned = learned.has(s.id);
@@ -309,7 +321,7 @@ export default function ReaderScreen() {
                 return (
                   <Text
                     key={s.id}
-                    onPress={() => setActive(s)}
+                    onPress={() => !ink.swallowPress() && setActive(s)}
                     style={[
                       styles.sentence,
                       isLearned && styles.sentenceLearned,
@@ -326,7 +338,7 @@ export default function ReaderScreen() {
               return (
                 <Text
                   key={s.id}
-                  onPress={() => setActive(s)}
+                  onPress={() => !ink.swallowPress() && setActive(s)}
                   style={[
                     styles.sentence,
                     isLearned && styles.sentenceLearned,
@@ -356,8 +368,10 @@ export default function ReaderScreen() {
             onNext={() => goTo(pageIdx + 1)}
           />
         ) : null}
+        {ink.canvas}
         </View>
       </ScrollView>
+      <InkTools ink={ink} onNotes={() => router.push("/notes")} />
       </View>
 
       {/* Bottom page nav */}

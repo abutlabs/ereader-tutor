@@ -67,7 +67,8 @@
             "enableShrinkResourcesInReleaseBuilds": true
           }
         }
-      ]
+      ],
+      "./plugins/withPointerEvents"
     ],
     "experiments": {
       "typedRoutes": false
