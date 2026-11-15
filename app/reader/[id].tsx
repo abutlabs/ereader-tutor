@@ -4,6 +4,8 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Image, Modal, Pressable, ScrollView, StyleSheet, Text, View } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { StatusBar } from "expo-status-bar";
+import AsyncStorage from "@react-native-async-storage/async-storage";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Feather } from "@expo/vector-icons";
 import type { Book, Figure, Sentence } from "../../src/data/schema";
@@ -24,9 +26,11 @@ import { bookChapters } from "../../src/data/chapters";
 import Ring from "../../src/components/Ring";
 import Flame from "../../src/components/Flame";
 import SessionComplete from "../../src/components/SessionComplete";
+import ContentsDrawer from "../../src/components/ContentsDrawer";
 import { colors, EINK, fonts, motion, radius, spacing } from "../../src/theme/theme";
 import { TOUCH, useLayout } from "../../src/theme/layout";
 
+const FULL_KEY = "reader:fullscreen"; // remembered across books and launches
 const FOCUS_DIM = 0.32; // opacity of non-active text while a sentence is focused
 
 export default function ReaderScreen() {
@@ -45,12 +49,22 @@ export default function ReaderScreen() {
   const [zoomed, setZoomed] = useState<string | null>(null); // uri of the image shown full-screen
   const [daily, setDaily] = useState<DailyState | null>(null);
   const [sessionDone, setSessionDone] = useState(false);
+  // Full-screen reading: all chrome hidden; a corner button and a contents
+  // drawer are the only controls, page turns sit at the end of the text.
+  const [full, setFull] = useState(false);
+  const [drawer, setDrawer] = useState(false);
   const hydrated = useRef(false);
   const scrollRef = useRef<ScrollView>(null);
 
   useEffect(() => {
     loadDaily().then(setDaily);
+    AsyncStorage.getItem(FULL_KEY).then((v) => setFull(v === "1")).catch(() => {});
   }, []);
+
+  function setFullScreen(on: boolean) {
+    setFull(on);
+    AsyncStorage.setItem(FULL_KEY, on ? "1" : "0").catch(() => {});
+  }
 
   // Load book once; pick the initial page from `start`, else the saved position.
   useEffect(() => {
@@ -206,7 +220,7 @@ export default function ReaderScreen() {
     <Pressable
       onPress={() => setZoomed(page.imageUri!)}
       accessibilityLabel="Show the page photo full-screen"
-      style={split ? styles.splitArt : undefined}
+      style={split ? [styles.splitArt, full && styles.pageFull] : undefined}
     >
       <Image
         source={{ uri: page.imageUri }}
@@ -225,11 +239,15 @@ export default function ReaderScreen() {
 
   return (
     <SafeAreaView style={styles.safe} edges={["top", "bottom"]}>
+      <StatusBar hidden={full} />
+      {full ? null : (
+      <>
       <ReaderHeader
         title={book.meta.title}
         subtitle={`${page.title ? page.title + " · " : ""}p.${page.page}`}
         onBack={() => router.back()}
         onContents={() => router.push({ pathname: "/contents/[id]", params: { id: id! } })}
+        onFullScreen={() => setFullScreen(true)}
         daily={daily}
       />
 
@@ -257,13 +275,15 @@ export default function ReaderScreen() {
         onPrev={() => goTo(pageIdx - 1)}
         onNext={() => goTo(pageIdx + 1)}
       />
+      </>
+      )}
 
       <View style={split ? styles.splitRow : styles.flex}>
       {split ? pageArt : null}
       <ScrollView
         ref={scrollRef}
         style={styles.flex}
-        contentContainerStyle={styles.page}
+        contentContainerStyle={[styles.page, full && styles.pageFull]}
         showsVerticalScrollIndicator={false}
       >
         <View style={textColumn}>
@@ -328,17 +348,57 @@ export default function ReaderScreen() {
         <Text style={styles.pageFooter}>
           {pageIdx === total - 1 ? "End of book so far" : `Page ${pageIdx + 1}`}
         </Text>
+        {full ? (
+          <PageNav
+            idx={pageIdx}
+            total={total}
+            onPrev={() => goTo(pageIdx - 1)}
+            onNext={() => goTo(pageIdx + 1)}
+          />
+        ) : null}
         </View>
       </ScrollView>
       </View>
 
       {/* Bottom page nav */}
-      <PageNav
-        idx={pageIdx}
-        total={total}
-        onPrev={() => goTo(pageIdx - 1)}
-        onNext={() => goTo(pageIdx + 1)}
-        filled
+      {full ? null : (
+        <PageNav
+          idx={pageIdx}
+          total={total}
+          onPrev={() => goTo(pageIdx - 1)}
+          onNext={() => goTo(pageIdx + 1)}
+          filled
+        />
+      )}
+
+      {/* Full-screen corner controls: contents drawer (left), exit (right). */}
+      {full ? (
+        <>
+          <Pressable
+            style={[styles.cornerBtn, styles.cornerLeft]}
+            onPress={() => setDrawer(true)}
+            accessibilityLabel="Contents"
+          >
+            <Feather name="menu" size={20} color={colors.inkSoft} />
+          </Pressable>
+          <Pressable
+            style={[styles.cornerBtn, styles.cornerRight]}
+            onPress={() => setFullScreen(false)}
+            accessibilityLabel="Exit full screen"
+          >
+            <Feather name="minimize-2" size={20} color={colors.inkSoft} />
+          </Pressable>
+        </>
+      ) : null}
+
+      <ContentsDrawer
+        visible={drawer}
+        book={book}
+        pageIdx={pageIdx}
+        onJump={goTo}
+        onFullContents={() => router.push({ pathname: "/contents/[id]", params: { id: id! } })}
+        onExitFullScreen={() => setFullScreen(false)}
+        onClose={() => setDrawer(false)}
       />
 
       {/* Full-screen image — a page photo or an illustration, to find your place in the physical book. */}
@@ -392,12 +452,14 @@ function ReaderHeader({
   subtitle,
   onBack,
   onContents,
+  onFullScreen,
   daily,
 }: {
   title: string;
   subtitle?: string;
   onBack: () => void;
   onContents?: () => void;
+  onFullScreen?: () => void;
   daily: DailyState | null;
 }) {
   return (
@@ -428,6 +490,11 @@ function ReaderHeader({
           {daily.streak > 0 && <Flame n={daily.streak} soft />}
         </View>
       )}
+      {onFullScreen ? (
+        <Pressable onPress={onFullScreen} style={styles.headerBtn} accessibilityLabel="Full screen">
+          <Feather name="maximize-2" size={20} color={colors.inkSoft} />
+        </Pressable>
+      ) : null}
     </View>
   );
 }
@@ -522,6 +589,22 @@ const styles = StyleSheet.create({
   headerSub: { fontFamily: fonts.ui, fontSize: 11, color: colors.inkFaint, marginTop: 1 },
   headerBtn: { minWidth: TOUCH, minHeight: TOUCH, alignItems: "center", justifyContent: "center" },
   flex: { flex: 1 },
+  cornerBtn: {
+    position: "absolute",
+    top: spacing(2),
+    width: TOUCH,
+    height: TOUCH,
+    borderRadius: TOUCH / 2,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.paper,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: colors.rule,
+    opacity: 0.85,
+  },
+  pageFull: { paddingTop: TOUCH + spacing(4) },
+  cornerLeft: { left: spacing(2) },
+  cornerRight: { right: spacing(2) },
   splitRow: { flex: 1, flexDirection: "row" },
   splitArt: {
     flex: 1,
