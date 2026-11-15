@@ -10,7 +10,7 @@ import type { Book } from "../../src/data/schema";
 import { getBook } from "../../src/storage/books";
 import { loadWordlist, removeWord, type SavedWord } from "../../src/storage/wordlist";
 import { onSpeakingChange, speak, stop } from "../../src/audio/speech";
-import { colors, fonts, radius, spacing } from "../../src/theme/theme";
+import { cardEdge, colors, fonts, radius, spacing } from "../../src/theme/theme";
 import { FORM_COLUMN } from "../../src/theme/layout";
 
 export default function WordlistScreen() {
@@ -128,6 +128,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     marginBottom: spacing(2),
     backgroundColor: colors.paperSoft,
+    ...cardEdge,
     paddingRight: spacing(2),
   },
   rowActive: { backgroundColor: colors.accentSoft },

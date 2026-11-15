@@ -3,7 +3,81 @@
 // theme are preserved (remapped to Hearth values) so existing screens adopt the
 // new look for free; the richer tokens below power the redesigned screens.
 
-export const colors = {
+import * as Device from "expo-device";
+import * as SecureStore from "expo-secure-store";
+
+// ── E-ink mode ────────────────────────────────────────────────────────────────
+// Colour e-ink (BOOX Note Air6 C) ghosts on tinted backgrounds and smears
+// animations, so e-ink mode is pure white/black with no motion. It's decided
+// once, synchronously, before any screen's StyleSheet is built — every module
+// that imports `colors` gets the right palette. Changing it reloads the app.
+//   pref "auto" (default): on for Onyx/BOOX devices; "on"/"off": forced.
+
+export type EinkPref = "auto" | "on" | "off";
+const EINK_KEY = "display_eink";
+
+export function isEinkDevice(): boolean {
+  const id = [Device.manufacturer, Device.brand, Device.modelName]
+    .filter(Boolean)
+    .join(" ")
+    .toLowerCase();
+  return /\b(onyx|boox)\b/.test(id);
+}
+
+function readEinkPref(): EinkPref {
+  try {
+    const v = SecureStore.getItem(EINK_KEY);
+    return v === "on" || v === "off" ? v : "auto";
+  } catch {
+    return "auto";
+  }
+}
+
+export const einkPref: EinkPref = readEinkPref();
+export const EINK: boolean = einkPref === "on" || (einkPref === "auto" && isEinkDevice());
+
+/** Persist the preference; the caller reloads the app to apply it. */
+export function saveEinkPref(pref: EinkPref): void {
+  try {
+    if (pref === "auto") SecureStore.deleteItemAsync(EINK_KEY);
+    else SecureStore.setItem(EINK_KEY, pref);
+  } catch {
+    /* non-fatal: stays on the current mode */
+  }
+}
+
+/** Modal/screen animation: none on e-ink. */
+export function motion<T extends string>(normal: T): T | "none" {
+  return EINK ? "none" : normal;
+}
+
+/** Visible edge for cards, which otherwise rely on a tinted background. */
+export const cardEdge = EINK
+  ? { borderWidth: 1, borderColor: "#000000" }
+  : {};
+
+const einkColors = {
+  paper: "#ffffff",
+  paperWarm: "#ffffff",
+  paperSoft: "#ffffff",
+  card: "#ffffff",
+  cardDeep: "#ffffff",
+  ink: "#000000",
+  inkSoft: "#262626",
+  inkFaint: "#4d4d4d",
+  rule: "#808080",
+  ruleSoft: "#b3b3b3",
+  accent: "#000000",
+  accentDeep: "#000000",
+  accentSoft: "#e0e0e0",
+  gold: "#000000",
+  good: "#000000",
+  goodSoft: "#ffffff",
+  scrim: "rgba(0,0,0,0.25)",
+  overlay: "rgba(0,0,0,0.25)",
+};
+
+const hearthColors = {
   paper: "#efe7d7", // screen background
   paperWarm: "#f3ecdd", // headers, footers
   paperSoft: "#fbf6ec", // legacy alias → Hearth `card` (cards/sheets/inputs)
@@ -23,6 +97,8 @@ export const colors = {
   scrim: "rgba(40,28,17,0.5)", // modal/sheet scrim
   overlay: "rgba(40,28,17,0.5)", // legacy alias → scrim
 };
+
+export const colors: typeof hearthColors = EINK ? einkColors : hearthColors;
 
 // Editorial pairing — Fraunces (display) + Spectral (body) + DM Sans (ui).
 export const fonts = {
@@ -55,5 +131,6 @@ export function hueFromString(s: string): number {
 }
 // Cover gradient stops for a given hue (light → dark, warm-literary).
 export function coverGradient(hue: number): [string, string] {
+  if (EINK) return ["#262626", "#000000"];
   return [`hsl(${hue}, 42%, 46%)`, `hsl(${hue}, 38%, 31%)`];
 }

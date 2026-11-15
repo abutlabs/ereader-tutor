@@ -13,7 +13,7 @@ import {
 import { Feather } from "@expo/vector-icons";
 import type { Sentence } from "../data/schema";
 import { normWord } from "../storage/wordlist";
-import { colors, fonts, radius, spacing } from "../theme/theme";
+import { cardEdge, colors, fonts, motion, radius, spacing } from "../theme/theme";
 import { TOUCH, useLayout } from "../theme/layout";
 
 interface Props {
@@ -56,7 +56,7 @@ export default function SentenceSheet({
   return (
     <Modal
       visible={visible}
-      animationType="slide"
+      animationType={motion("slide")}
       transparent
       onRequestClose={onClose}
     >
@@ -300,6 +300,7 @@ const styles = StyleSheet.create({
     marginBottom: spacing(2.5),
     borderLeftWidth: 3,
     borderLeftColor: colors.accent,
+    ...cardEdge,
   },
   noteTitle: {
     fontFamily: fonts.bodyMedium,

@@ -3,7 +3,7 @@
 
 import { useEffect, useState } from "react";
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from "react-native";
-import { colors, fonts, radius, spacing } from "../theme/theme";
+import { colors, fonts, motion, radius, spacing } from "../theme/theme";
 
 interface Props {
   visible: boolean;
@@ -35,7 +35,7 @@ export default function NumberPrompt({
   const valid = Number.isFinite(n) && n > 0;
 
   return (
-    <Modal visible={visible} transparent animationType="fade" onRequestClose={onCancel}>
+    <Modal visible={visible} transparent animationType={motion("fade")} onRequestClose={onCancel}>
       <View style={styles.backdrop}>
         <View style={styles.card}>
           <Text style={styles.title}>{title}</Text>

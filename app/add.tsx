@@ -16,7 +16,7 @@ import { appendPage, createBook } from "../src/storage/books";
 import { getApiKey, getModel } from "../src/storage/apiKey";
 import { textToLesson, lessonToParagraphs } from "../src/api/claude";
 import { languageName } from "../src/data/languages";
-import { colors, fonts, radius, spacing } from "../src/theme/theme";
+import { cardEdge, colors, fonts, radius, spacing } from "../src/theme/theme";
 import { FORM_COLUMN } from "../src/theme/layout";
 
 const LANGS = [
@@ -382,7 +382,7 @@ const styles = StyleSheet.create({
   buildText: { fontFamily: fonts.uiSemibold, fontSize: 15.5, color: "#fff" },
   smallNote: { fontFamily: fonts.body, fontSize: 12.5, color: colors.inkFaint, textAlign: "center", marginTop: spacing(2) },
 
-  card: { backgroundColor: colors.card, borderRadius: radius.md, padding: spacing(5) },
+  card: { backgroundColor: colors.card, borderRadius: radius.md, padding: spacing(5), ...cardEdge },
   lcpBody: { fontFamily: fonts.body, fontSize: 14.5, lineHeight: 21, color: colors.inkSoft, marginTop: spacing(2) },
   lcpNote: { fontFamily: fonts.body, fontSize: 13, lineHeight: 19, color: colors.inkFaint, marginTop: spacing(3) },
 
@@ -400,6 +400,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing(2),
     backgroundColor: colors.card,
+    ...cardEdge,
     borderRadius: radius.md,
     borderWidth: 1,
     borderColor: colors.ruleSoft,

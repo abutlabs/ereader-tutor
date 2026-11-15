@@ -16,7 +16,7 @@ import {
   sharePackage,
   type ExportFlags,
 } from "../../src/transfer/package";
-import { colors, fonts, radius, spacing } from "../../src/theme/theme";
+import { cardEdge, colors, fonts, radius, spacing } from "../../src/theme/theme";
 import { FORM_COLUMN } from "../../src/theme/layout";
 
 const PRESETS: Record<string, ExportFlags> = {
@@ -155,6 +155,7 @@ const styles = StyleSheet.create({
     alignItems: "center",
     gap: spacing(3.5),
     backgroundColor: colors.card,
+    ...cardEdge,
     borderRadius: radius.md,
     padding: spacing(3.5),
     marginBottom: spacing(5),

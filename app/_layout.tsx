@@ -15,7 +15,8 @@ import {
   DMSans_700Bold,
 } from "@expo-google-fonts/dm-sans";
 import { SafeAreaProvider } from "react-native-safe-area-context";
-import { colors } from "../src/theme/theme";
+import * as SystemUI from "expo-system-ui";
+import { colors, motion } from "../src/theme/theme";
 import { ensureBundledBooks } from "../src/storage/bundled";
 
 SplashScreen.preventAutoHideAsync();
@@ -36,6 +37,8 @@ export default function RootLayout() {
   // splash screen so the library is complete the first time the home screen shows.
   const [booksReady, setBooksReady] = useState(false);
   useEffect(() => {
+    // Root view behind every screen — white on e-ink, not the cream splash colour.
+    SystemUI.setBackgroundColorAsync(colors.paper).catch(() => {});
     ensureBundledBooks().finally(() => setBooksReady(true));
   }, []);
 
@@ -53,7 +56,7 @@ export default function RootLayout() {
         screenOptions={{
           headerShown: false,
           contentStyle: { backgroundColor: colors.paper },
-          animation: "slide_from_right",
+          animation: motion("slide_from_right"),
         }}
       />
     </SafeAreaProvider>

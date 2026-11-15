@@ -24,7 +24,7 @@ import { bookChapters } from "../../src/data/chapters";
 import Ring from "../../src/components/Ring";
 import Flame from "../../src/components/Flame";
 import SessionComplete from "../../src/components/SessionComplete";
-import { colors, fonts, radius, spacing } from "../../src/theme/theme";
+import { colors, EINK, fonts, motion, radius, spacing } from "../../src/theme/theme";
 import { TOUCH, useLayout } from "../../src/theme/layout";
 
 const FOCUS_DIM = 0.32; // opacity of non-active text while a sentence is focused
@@ -343,7 +343,7 @@ export default function ReaderScreen() {
 
       {/* Full-screen image — a page photo or an illustration, to find your place in the physical book. */}
 
-      <Modal visible={!!zoomed} transparent animationType="fade" onRequestClose={() => setZoomed(null)}>
+      <Modal visible={!!zoomed} transparent animationType={motion("fade")} onRequestClose={() => setZoomed(null)}>
 
         <Pressable style={styles.zoomBackdrop} onPress={() => setZoomed(null)}>
 
@@ -627,7 +627,7 @@ const styles = StyleSheet.create({
     textDecorationColor: colors.accent,
   },
   sentenceLearned: { color: colors.inkSoft },
-  dim: { opacity: 0.32 },
+  dim: { opacity: EINK ? 0.45 : 0.32 },
   learnedCheck: { color: colors.good, fontFamily: fonts.uiRegular, fontSize: 14 },
   dropCap: {
     fontFamily: fonts.displayBold,

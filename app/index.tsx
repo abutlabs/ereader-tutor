@@ -32,7 +32,7 @@ import Ring from "../src/components/Ring";
 import Flame from "../src/components/Flame";
 import Cover from "../src/components/Cover";
 import ProgressBar from "../src/components/ProgressBar";
-import { colors, fonts, radius, spacing } from "../src/theme/theme";
+import { cardEdge, colors, EINK, fonts, radius, spacing } from "../src/theme/theme";
 import { cellWidth, TOUCH, useLayout } from "../src/theme/layout";
 
 interface BookCard {
@@ -377,6 +377,7 @@ const styles = StyleSheet.create({
     paddingVertical: spacing(4),
     paddingHorizontal: spacing(4.5),
     marginBottom: spacing(4),
+    ...cardEdge,
   },
   ringCount: { fontFamily: fonts.displayBold, fontSize: 18, color: colors.ink, lineHeight: 20 },
   ringGoal: { fontFamily: fonts.ui, fontSize: 10.5, color: colors.inkFaint },
@@ -391,10 +392,11 @@ const styles = StyleSheet.create({
     padding: spacing(4),
     marginBottom: spacing(5),
     shadowColor: "#281c11",
-    shadowOpacity: 0.1,
+    shadowOpacity: EINK ? 0 : 0.1,
     shadowRadius: 14,
     shadowOffset: { width: 0, height: 8 },
-    elevation: 3,
+    elevation: EINK ? 0 : 3,
+    ...cardEdge,
   },
   kicker: {
     fontFamily: fonts.uiSemibold,
@@ -424,6 +426,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing(3.5),
     marginBottom: spacing(3),
+    ...cardEdge,
   },
   rowTitle: { fontFamily: fonts.display, fontSize: 18, color: colors.ink },
   rowAuthor: { fontFamily: fonts.body, fontSize: 13, color: colors.inkSoft, marginTop: spacing(0.5) },
@@ -437,6 +440,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.md,
     padding: spacing(3.5),
     marginBottom: spacing(3),
+    ...cardEdge,
   },
   lockWrap: { position: "relative" },
   lockBadge: {
@@ -490,6 +494,7 @@ const styles = StyleSheet.create({
     padding: spacing(4),
     gap: spacing(3),
     marginTop: spacing(2),
+    ...cardEdge,
   },
   input: {
     fontFamily: fonts.body,
