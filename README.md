@@ -116,6 +116,22 @@ public catalog.
 - **Page numbering.** Each scan is labelled with its real book page number
   (so out-of-order scans and gaps are fine); Claude also reads the printed
   number as a cross-check.
+- **Tablets and e-ink (BOOX Note Air6 C).** Follows the device orientation;
+  on a wide landscape screen the page art sits beside the text, otherwise the
+  text is a centered ~40em column with larger type; library and chapters in
+  grids; 48dp touch targets. **E-ink mode** (white/black, no tint, no
+  animation) turns on automatically on Onyx BOOX and can be toggled in
+  Settings → Display. **Full screen** (⤢ in the reader header) hides all chrome;
+  ☰ opens a contents drawer.
+- **Pen notes.** In the reader the stylus writes, a finger scrolls, and a pen
+  tap still opens a sentence. Notes anchor to sentences, so they follow the
+  text through rotation. Pen tools: undo, eraser, write-with-finger, clear
+  page. **Pen notes** (✎ on the library) lists them, with JSON export/import.
+  Notes stay on the device. Needs the native build: pointer events are
+  enabled by `plugins/withPointerEvents.js`, so Expo Go won't draw.
+- **Test builds for the tablet.** Actions → EAS Build → profile `boox-beta`
+  builds an APK from any branch into the **BOOX beta** prerelease. It uses its
+  own EAS channel with no updates, so it always runs the code it was built from.
 
 ---
 
